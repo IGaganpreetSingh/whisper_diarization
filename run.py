@@ -13,7 +13,13 @@ job_statuses = {}
 
 
 def process_audio(
-    job_id: str, audio_path: str, language: str, model_name: str, device: str
+    job_id: str,
+    audio_path: str,
+    language: str,
+    model_name: str,
+    device: str,
+    suppress_numerals: bool,
+    stem: bool,
 ):
     try:
         # Run the diarization script
@@ -30,6 +36,10 @@ def process_audio(
         ]
         if language:
             command.extend(["--language", language])
+        if suppress_numerals:
+            command.append("--suppress_numerals")
+        if not stem:
+            command.append("--no-stem")
 
         subprocess.run(command, check=True)
 
@@ -49,6 +59,8 @@ async def transcribe(
     language: str = Form(None),
     model_name: str = Form("large-v3"),
     device: str = Form(None),
+    suppress_numerals: bool = Form(False),
+    stem: bool = Form(True),
 ):
     # Generate a unique job ID
     job_id = str(uuid.uuid4())
@@ -68,7 +80,14 @@ async def transcribe(
 
     # Start the background task
     background_tasks.add_task(
-        process_audio, job_id, temp_audio_path, language, model_name, device
+        process_audio,
+        job_id,
+        temp_audio_path,
+        language,
+        model_name,
+        device,
+        suppress_numerals,
+        stem,
     )
 
     # Return the job ID immediately
