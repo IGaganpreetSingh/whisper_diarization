@@ -50,11 +50,5 @@ pip3 --version
 
 
 git clone https://github.com/IGaganpreetSingh/whisper_diarization.git
-cd whisper-diarization
 apt update && sudo apt install -y cython3 ffmpeg
-pip install -r requirements.txt
-pip install python-multipart fastapi uvicorn
-pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
-pip uninstall huggingface_hub -y
-pip install huggingface-hub==0.20.3
 
