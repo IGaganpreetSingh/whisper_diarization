@@ -48,7 +48,8 @@ pip --version
 echo "pip3 version set to:"
 pip3 --version
 
+apt install -y cython3 ffmpeg libcudnn8 libcudnn8-dev
 
 git clone https://github.com/IGaganpreetSingh/whisper_diarization.git
-apt update && sudo apt install -y cython3 ffmpeg
+
 

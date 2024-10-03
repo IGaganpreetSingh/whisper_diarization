@@ -64,7 +64,7 @@ parser.add_argument(
     "--batch-size",
     type=int,
     dest="batch_size",
-    default=8,
+    default=64,
     help="Batch size for batched inference, reduce if you run out of memory, set to 0 for non-batched inference",
 )
 
