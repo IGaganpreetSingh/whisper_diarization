@@ -7,6 +7,4 @@ git+https://github.com/MahmoudAshraf97/ctc-forced-aligner.git
 python-multipart 
 fastapi 
 uvicorn
-torch --index-url https://download.pytorch.org/whl/cu124
-torchvision --index-url https://download.pytorch.org/whl/cu124
-torchaudio --index-url https://download.pytorch.org/whl/cu124
+ipython
