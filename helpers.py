@@ -1,5 +1,5 @@
 import json
-import logging
+import re
 import os
 import shutil
 
@@ -340,6 +340,34 @@ def get_last_word_idx_of_sentence(word_idx, word_list, max_words):
         if right_idx == len(word_list) - 1 or is_word_sentence_end(right_idx)
         else -1
     )
+
+
+def format_transcript(text):
+    # Preserve speaker labels by splitting by new lines
+    lines = text.split("\n")
+    cleaned_lines = []
+
+    for line in lines:
+        # Replace multiple spaces with a single space
+        line = re.sub(r"\s+", " ", line)
+        # Ensure only one space after periods and question marks, except for ellipsis
+        line = re.sub(r"(?<!\.)\.(?!\.)\s+", ". ", line)
+        line = re.sub(r"\?\s+", "? ", line)
+        line = re.sub(r"!\s+", "! ", line)
+
+        line = re.sub(r"(\w+) at (\w+\.\w+)", r"\1@\2", line)
+
+        # Capitalize the first letter of the sentence after a speaker label
+        line = re.sub(
+            r"(^Speaker \d+:)\s*(\w)",
+            lambda x: x.group(1) + " " + x.group(2).upper(),
+            line,
+        )
+
+        cleaned_lines.append(line)
+
+    # Join the cleaned lines back together, preserving new lines between speakers
+    return "\n".join(cleaned_lines)
 
 
 def get_realigned_ws_mapping_with_punctuation(

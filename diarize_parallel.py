@@ -3,7 +3,7 @@ import logging
 import os
 import re
 import subprocess
-
+import io
 import torch
 from ctc_forced_aligner import (
     generate_emissions,
@@ -25,7 +25,7 @@ from helpers import (
     process_language_arg,
     punct_model_langs,
     whisper_langs,
-    write_srt,
+    format_transcript,
 )
 from transcription_helpers import transcribe_batched
 
@@ -174,14 +174,25 @@ ROOT = os.getcwd()
 temp_path = os.path.join(ROOT, "temp_outputs")
 
 speaker_ts = []
+speaker_id_map = {}
+next_id = 1
+
 with open(os.path.join(temp_path, "pred_rttms", "mono_file.rttm"), "r") as f:
     lines = f.readlines()
     for line in lines:
         line_list = line.split(" ")
         s = int(float(line_list[5]) * 1000)
         e = s + int(float(line_list[8]) * 1000)
-        speaker_ts.append([s, e, int(line_list[11].split("_")[-1])])
+        original_id = int(line_list[11].split("_")[-1])
 
+        if original_id not in speaker_id_map:
+            speaker_id_map[original_id] = next_id
+            next_id += 1
+
+        new_id = speaker_id_map[original_id]
+        speaker_ts.append([s, e, new_id])
+
+# Modified get_words_speaker_mapping function call
 wsm = get_words_speaker_mapping(word_timestamps, speaker_ts, "start")
 
 if language in punct_model_langs:
@@ -190,7 +201,7 @@ if language in punct_model_langs:
 
     words_list = list(map(lambda x: x["word"], wsm))
 
-    labled_words = punct_model.predict(words_list, chunk_size=230)
+    labeled_words = punct_model.predict(words_list, chunk_size=230)
 
     ending_puncts = ".?!"
     model_puncts = ".,;:!?"
@@ -198,7 +209,7 @@ if language in punct_model_langs:
     # We don't want to punctuate U.S.A. with a period. Right?
     is_acronym = lambda x: re.fullmatch(r"\b(?:[a-zA-Z]\.){2,}", x)
 
-    for word_dict, labeled_tuple in zip(wsm, labled_words):
+    for word_dict, labeled_tuple in zip(wsm, labeled_words):
         word = word_dict["word"]
         if (
             word
@@ -215,13 +226,24 @@ else:
         f"Punctuation restoration is not available for {language} language. Using the original punctuation."
     )
 
+# Punctuation restoration and realignment
 wsm = get_realigned_ws_mapping_with_punctuation(wsm)
 ssm = get_sentences_speaker_mapping(wsm, speaker_ts)
 
-with open(f"{os.path.splitext(args.audio)[0]}.txt", "w", encoding="utf-8-sig") as f:
-    get_speaker_aware_transcript(ssm, f)
+# Capture the transcript in memory first
+transcript_io = io.StringIO()
 
-with open(f"{os.path.splitext(args.audio)[0]}.srt", "w", encoding="utf-8-sig") as srt:
-    write_srt(ssm, srt)
+# Generate speaker-aware transcript (write to the in-memory file-like object)
+get_speaker_aware_transcript(ssm, transcript_io)
+
+# Retrieve the transcript text from the in-memory object
+transcript_txt = transcript_io.getvalue()
+
+# Apply the cleanup function
+formated_transcript_txt = format_transcript(transcript_txt)
+
+# Write the cleaned transcript to a .txt file
+with open(f"{os.path.splitext(args.audio)[0]}.txt", "w", encoding="utf-8-sig") as f:
+    f.write(formated_transcript_txt)
 
 cleanup(temp_path)
