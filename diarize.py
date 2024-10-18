@@ -5,15 +5,6 @@ import re
 import io
 import torch
 import torchaudio
-import numpy as np
-
-# Set seeds for NumPy and PyTorch
-np.random.seed(42)
-torch.manual_seed(42)
-
-# Now, random operations will be reproducible
-random_array = np.random.rand(5)
-print(random_array)  # This will always produce the same 5 random numbers
 
 from ctc_forced_aligner import (
     generate_emissions,
@@ -41,7 +32,7 @@ from helpers import (
 )
 from transcription_helpers import transcribe_batched
 
-mtypes = {"cpu": "int8", "cuda": "float16"}
+mtypes = {"cpu": "int8", "cuda": "float32"}
 
 # Initialize parser
 parser = argparse.ArgumentParser()
