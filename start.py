@@ -1,6 +1,4 @@
-# api.py
 import os
-import tempfile
 from fastapi import FastAPI, File, UploadFile, Form, BackgroundTasks
 from fastapi.responses import FileResponse, JSONResponse
 import subprocess
@@ -58,7 +56,7 @@ def process_audio(
             model_name,
             "--device",
             device,
-            "--temp-dir",  # New argument for temp directory
+            "--temp-dir",
             str(job_dir),
         ]
 
@@ -151,7 +149,7 @@ async def get_status(job_id: str):
 
 
 @app.get("/result/{job_id}")
-async def get_result(job_id: str):
+async def get_result(job_id: str, background_tasks: BackgroundTasks):
     if job_id not in job_statuses:
         return JSONResponse({"status": "not_found"}, status_code=404)
 
@@ -163,12 +161,12 @@ async def get_result(job_id: str):
     if not os.path.exists(output_file):
         return JSONResponse({"status": "file_not_found"}, status_code=404)
 
-    # Return the file and cleanup after sending
+    # Add cleanup task properly
+    background_tasks.add_task(cleanup_job_files, job_id)
+
+    # Return the file
     return FileResponse(
-        output_file,
-        media_type="text/plain",
-        filename="transcription.txt",
-        background=BackgroundTasks([lambda: cleanup_job_files(job_id)]),
+        output_file, media_type="text/plain", filename="transcription.txt"
     )
 
 
