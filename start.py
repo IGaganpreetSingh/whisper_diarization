@@ -5,6 +5,7 @@ import subprocess
 import torch
 import uuid
 from pathlib import Path
+from helpers import cleanup
 
 app = FastAPI()
 
@@ -42,11 +43,9 @@ def process_audio(
     stem: bool,
 ):
     try:
-        # Get unique directory for this job
         job_dir = get_job_dir(job_id)
-
-        # Run the diarization script with the job-specific directory
         output_base = os.path.splitext(audio_path)[0]
+
         command = [
             "python",
             "transcribe.py",
@@ -59,7 +58,6 @@ def process_audio(
             "--temp-dir",
             str(job_dir),
         ]
-
         if language:
             command.extend(["--language", language])
         if suppress_numerals:
@@ -67,32 +65,40 @@ def process_audio(
         if not stem:
             command.append("--no-stem")
 
-        subprocess.run(command, check=True)
+        # Start the transcription as a subprocess
+        process = subprocess.Popen(command)
 
-        # Copy the output file to a results directory
+        # Periodically check if the job was canceled
+        while process.poll() is None:
+            if job_statuses[job_id].get("canceled"):
+                process.terminate()  # Stop the subprocess if canceled
+                job_statuses[job_id] = {"status": "canceled"}  # Update status
+                cleanup(str(job_dir))  # Call your cleanup function
+                return  # Exit the function to skip further processing
+        process.wait()  # Ensure the process finishes
+
+        # If not canceled, proceed with file handling
         output_file = f"{output_base}.txt"
-        results_dir = job_dir / "results"
-        results_dir.mkdir(exist_ok=True)
-
         if os.path.exists(output_file):
             import shutil
-
-            final_output = results_dir / "transcription.txt"
+            final_output = job_dir / "results" / "transcription.txt"
+            results_dir = job_dir / "results"
+            results_dir.mkdir(exist_ok=True)
             shutil.copy2(output_file, final_output)
-            os.remove(output_file)  # Remove the original output file
-
-            # Update job status
+            os.remove(output_file)
             job_statuses[job_id] = {
                 "status": "completed",
                 "output_file": str(final_output),
             }
         else:
-            raise FileNotFoundError("Transcription output file not found")
+            # Handle missing file without error if canceled
+            if not job_statuses[job_id].get("canceled"):
+                raise FileNotFoundError("Transcription output file not found")
 
     except Exception as e:
         job_statuses[job_id] = {"status": "failed", "error": str(e)}
     finally:
-        # Clean up the input audio file
+        # Clean up the audio file after processing
         if os.path.exists(audio_path):
             os.remove(audio_path)
 
@@ -168,6 +174,14 @@ async def get_result(job_id: str, background_tasks: BackgroundTasks):
     return FileResponse(
         output_file, media_type="text/plain", filename="transcription.txt"
     )
+
+
+@app.post("/cancel/{job_id}")
+async def cancel_transcription(job_id: str):
+    if job_id not in job_statuses:
+        return JSONResponse({"status": "not_found"}, status_code=404)
+    job_statuses[job_id]["canceled"] = True
+    return JSONResponse({"status": "canceled"})
 
 
 if __name__ == "__main__":
