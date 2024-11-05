@@ -465,26 +465,27 @@ def get_sentences_speaker_mapping(word_speaker_mapping, spk_ts):
 def get_speaker_aware_transcript(sentences_speaker_mapping, f):
     previous_speaker = sentences_speaker_mapping[0]["speaker"]
 
-    # Check if first sentence is empty or just whitespace
+    # Handle first speaker
     if not sentences_speaker_mapping[0]["text"].strip():
-        f.write(f"{previous_speaker}: (indistinct)\n\n")
+        f.write(f"{previous_speaker}: (indistinct)")  # Removed \n\n
     else:
-        f.write(f"{previous_speaker}: {sentences_speaker_mapping[0]['text']}")
+        f.write(f"{previous_speaker}: {sentences_speaker_mapping[0]['text'].strip()}")
 
-    for sentence_dict in sentences_speaker_mapping[1:]:  # Start from second sentence
+    for sentence_dict in sentences_speaker_mapping[1:]:
         speaker = sentence_dict["speaker"]
-        sentence = sentence_dict["text"].strip()  # Remove leading/trailing whitespace
+        sentence = sentence_dict["text"].strip()
 
         # If this speaker doesn't match the previous one
         if speaker != previous_speaker:
-            # Only write the speaker and their text if there's actual content
+            # Add newline before new speaker
+            f.write("\n\n")
             if sentence:
-                f.write(f"\n\n{speaker}: {sentence} ")
+                f.write(f"{speaker}: {sentence} ")
             else:
-                f.write(f"\n\n{speaker}: (indistinct) ")
+                f.write(f"{speaker}: (indistinct)")
             previous_speaker = speaker
         else:
-            # For same speaker, just append the sentence if it's not empty
+            # For same speaker, just append non-empty sentences
             if sentence:
                 f.write(sentence + " ")
 
