@@ -359,7 +359,7 @@ def format_transcript(text):
         line = re.sub(r"(\w+) at (\w+)\s*\.\s*(\w+)", r"\1@\2.\3", line)
         line = re.sub(r"(\d+)\s*-\s*(\d+)\s*-\s*(\d+)", r"\1-\2-\3", line)
         # Use re.sub to remove all occurrences of "..."
-        line = re.sub(r"\.\.\.", "", line)
+        line = re.sub(r"\.\.\.", "(indistinct)", line)
 
         # Capitalize the first letter of the sentence after a speaker label
         line = re.sub(

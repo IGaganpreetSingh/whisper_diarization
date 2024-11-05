@@ -204,39 +204,39 @@ with open(os.path.join(temp_path, "pred_rttms", "mono_file.rttm"), "r") as f:
 # Modified get_words_speaker_mapping function call
 wsm = get_words_speaker_mapping(word_timestamps, speaker_ts, "start")
 
-if language in punct_model_langs:
-    # restoring punctuation in the transcript to help realign the sentences
-    punct_model = PunctuationModel(model="kredor/punctuate-all")
+# if language in punct_model_langs:
+#     # restoring punctuation in the transcript to help realign the sentences
+#     punct_model = PunctuationModel(model="kredor/punctuate-all")
 
-    words_list = list(map(lambda x: x["word"], wsm))
+#     words_list = list(map(lambda x: x["word"], wsm))
 
-    labeled_words = punct_model.predict(words_list, chunk_size=230)
+#     labeled_words = punct_model.predict(words_list, chunk_size=230)
 
-    ending_puncts = ".?!"
-    model_puncts = ".,;:!?"
+#     ending_puncts = ".?!"
+#     model_puncts = ".,;:!?"
 
-    # We don't want to punctuate U.S.A. with a period. Right?
-    is_acronym = lambda x: re.fullmatch(r"\b(?:[a-zA-Z]\.){2,}", x)
+#     # We don't want to punctuate U.S.A. with a period. Right?
+#     is_acronym = lambda x: re.fullmatch(r"\b(?:[a-zA-Z]\.){2,}", x)
 
-    for word_dict, labeled_tuple in zip(wsm, labeled_words):
-        word = word_dict["word"]
-        if (
-            word
-            and labeled_tuple[1] in ending_puncts
-            and (word[-1] not in model_puncts or is_acronym(word))
-        ):
-            word += labeled_tuple[1]
-            if word.endswith(".."):
-                word = word.rstrip(".")
-            word_dict["word"] = word
+#     for word_dict, labeled_tuple in zip(wsm, labeled_words):
+#         word = word_dict["word"]
+#         if (
+#             word
+#             and labeled_tuple[1] in ending_puncts
+#             and (word[-1] not in model_puncts or is_acronym(word))
+#         ):
+#             word += labeled_tuple[1]
+#             if word.endswith(".."):
+#                 word = word.rstrip(".")
+#             word_dict["word"] = word
 
-else:
-    logging.warning(
-        f"Punctuation restoration is not available for {language} language. Using the original punctuation."
-    )
+# else:
+#     logging.warning(
+#         f"Punctuation restoration is not available for {language} language. Using the original punctuation."
+#     )
 
 # Punctuation restoration and realignment
-wsm = get_realigned_ws_mapping_with_punctuation(wsm)
+# wsm = get_realigned_ws_mapping_with_punctuation(wsm)
 ssm = get_sentences_speaker_mapping(wsm, speaker_ts)
 
 # Capture the transcript in memory first
