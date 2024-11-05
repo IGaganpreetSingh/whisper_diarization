@@ -236,7 +236,7 @@ wsm = get_words_speaker_mapping(word_timestamps, speaker_ts, "start")
 #     )
 
 # Punctuation restoration and realignment
-# wsm = get_realigned_ws_mapping_with_punctuation(wsm)
+wsm = get_realigned_ws_mapping_with_punctuation(wsm)
 ssm = get_sentences_speaker_mapping(wsm, speaker_ts)
 
 # Capture the transcript in memory first
