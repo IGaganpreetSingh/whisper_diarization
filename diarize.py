@@ -166,12 +166,12 @@ word_timestamps = postprocess_results(text_starred, spans, stride, scores)
 ROOT = os.getcwd()
 temp_path = os.path.join(ROOT, "temp_outputs")
 os.makedirs(temp_path, exist_ok=True)
-torchaudio.save(
-    os.path.join(temp_path, "mono_file.wav"),
-    audio_waveform.cpu().unsqueeze(0).float(),
-    16000,
-    channels_first=True,
-)
+# torchaudio.save(
+#     os.path.join(temp_path, "mono_file.wav"),
+#     audio_waveform.cpu().unsqueeze(0).float(),
+#     16000,
+#     channels_first=True,
+# )
 
 
 # Initialize NeMo MSDD diarization model
@@ -186,6 +186,7 @@ speaker_ts = []
 speaker_id_map = {}
 next_id = 1
 
+# Step 1: Read all lines and map original speaker IDs
 with open(os.path.join(temp_path, "pred_rttms", "mono_file.rttm"), "r") as f:
     lines = f.readlines()
     for line in lines:
@@ -194,46 +195,59 @@ with open(os.path.join(temp_path, "pred_rttms", "mono_file.rttm"), "r") as f:
         e = s + int(float(line_list[8]) * 1000)
         original_id = int(line_list[11].split("_")[-1])
 
+        # Add to the map if original_id is new, but don't assign next_id yet
         if original_id not in speaker_id_map:
-            speaker_id_map[original_id] = next_id
-            next_id += 1
+            speaker_id_map[original_id] = None  # Placeholder
 
-        new_id = speaker_id_map[original_id]
-        speaker_ts.append([s, e, new_id])
+# Step 2: Sort original IDs and assign sequential IDs
+sorted_original_ids = sorted(speaker_id_map.keys())
+for original_id in sorted_original_ids:
+    speaker_id_map[original_id] = next_id
+    next_id += 1
+
+# Step 3: Create speaker_ts with consistent new IDs
+for line in lines:
+    line_list = line.split(" ")
+    s = int(float(line_list[5]) * 1000)
+    e = s + int(float(line_list[8]) * 1000)
+    original_id = int(line_list[11].split("_")[-1])
+
+    new_id = speaker_id_map[original_id]
+    speaker_ts.append([s, e, new_id])
 
 # Modified get_words_speaker_mapping function call
 wsm = get_words_speaker_mapping(word_timestamps, speaker_ts, "start")
 
-# if language in punct_model_langs:
-#     # restoring punctuation in the transcript to help realign the sentences
-#     punct_model = PunctuationModel(model="kredor/punctuate-all")
+if language in punct_model_langs:
+    # restoring punctuation in the transcript to help realign the sentences
+    punct_model = PunctuationModel(model="kredor/punctuate-all")
 
-#     words_list = list(map(lambda x: x["word"], wsm))
+    words_list = list(map(lambda x: x["word"], wsm))
 
-#     labeled_words = punct_model.predict(words_list, chunk_size=230)
+    labeled_words = punct_model.predict(words_list, chunk_size=230)
 
-#     ending_puncts = ".?!"
-#     model_puncts = ".,;:!?"
+    ending_puncts = ".?!"
+    model_puncts = ".,;:!?"
 
-#     # We don't want to punctuate U.S.A. with a period. Right?
-#     is_acronym = lambda x: re.fullmatch(r"\b(?:[a-zA-Z]\.){2,}", x)
+    # We don't want to punctuate U.S.A. with a period. Right?
+    is_acronym = lambda x: re.fullmatch(r"\b(?:[a-zA-Z]\.){2,}", x)
 
-#     for word_dict, labeled_tuple in zip(wsm, labeled_words):
-#         word = word_dict["word"]
-#         if (
-#             word
-#             and labeled_tuple[1] in ending_puncts
-#             and (word[-1] not in model_puncts or is_acronym(word))
-#         ):
-#             word += labeled_tuple[1]
-#             if word.endswith(".."):
-#                 word = word.rstrip(".")
-#             word_dict["word"] = word
+    for word_dict, labeled_tuple in zip(wsm, labeled_words):
+        word = word_dict["word"]
+        if (
+            word
+            and labeled_tuple[1] in ending_puncts
+            and (word[-1] not in model_puncts or is_acronym(word))
+        ):
+            word += labeled_tuple[1]
+            if word.endswith(".."):
+                word = word.rstrip(".")
+            word_dict["word"] = word
 
-# else:
-#     logging.warning(
-#         f"Punctuation restoration is not available for {language} language. Using the original punctuation."
-#     )
+else:
+    logging.warning(
+        f"Punctuation restoration is not available for {language} language. Using the original punctuation."
+    )
 
 # Punctuation restoration and realignment
 wsm = get_realigned_ws_mapping_with_punctuation(wsm)
