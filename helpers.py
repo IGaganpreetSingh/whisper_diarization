@@ -224,16 +224,21 @@ def create_config(output_dir):
     CONFIG_LOCAL_DIRECTORY = "nemo_msdd_configs"
     CONFIG_FILE_NAME = f"diar_infer_{DOMAIN_TYPE}.yaml"
     MODEL_CONFIG_PATH = os.path.join(CONFIG_LOCAL_DIRECTORY, CONFIG_FILE_NAME)
+
+    # Ensure the configuration file is available locally
     if not os.path.exists(MODEL_CONFIG_PATH):
         os.makedirs(CONFIG_LOCAL_DIRECTORY, exist_ok=True)
         CONFIG_URL = f"https://raw.githubusercontent.com/NVIDIA/NeMo/main/examples/speaker_tasks/diarization/conf/inference/{CONFIG_FILE_NAME}"
         MODEL_CONFIG_PATH = wget.download(CONFIG_URL, MODEL_CONFIG_PATH)
 
+    # Load the configuration file
     config = OmegaConf.load(MODEL_CONFIG_PATH)
 
+    # Prepare output data directory
     data_dir = os.path.join(output_dir, "data")
     os.makedirs(data_dir, exist_ok=True)
 
+    # Define meta information for input manifest
     meta = {
         "audio_filepath": os.path.join(output_dir, "mono_file.wav"),
         "offset": 0,
@@ -243,31 +248,36 @@ def create_config(output_dir):
         "rttm_filepath": None,
         "uem_filepath": None,
     }
+    # Write input manifest for diarization
     with open(os.path.join(data_dir, "input_manifest.json"), "w") as fp:
         json.dump(meta, fp)
         fp.write("\n")
 
+    # Set pre-trained model paths
     pretrained_vad = "vad_multilingual_marblenet"
     pretrained_speaker_model = "titanet_large"
-    config.num_workers = 0
+
+    # Configuration adjustments for deterministic output
+    config.num_workers = 0  # Single-threaded to reduce randomness
     config.diarizer.manifest_filepath = os.path.join(data_dir, "input_manifest.json")
-    config.diarizer.out_dir = (
-        output_dir  # Directory to store intermediate files and prediction outputs
-    )
+    config.diarizer.out_dir = output_dir  # For intermediate and prediction output
 
     config.diarizer.speaker_embeddings.model_path = pretrained_speaker_model
-    config.diarizer.oracle_vad = (
-        False  # compute VAD provided with model_path to vad config
-    )
+    config.diarizer.oracle_vad = False  # Use VAD model instead of oracle VAD
     config.diarizer.clustering.parameters.oracle_num_speakers = False
 
-    # Here, we use our in-house pretrained NeMo VAD model
+    # Set deterministic VAD parameters
     config.diarizer.vad.model_path = pretrained_vad
-    config.diarizer.vad.parameters.onset = 0.8
-    config.diarizer.vad.parameters.offset = 0.6
+    config.diarizer.vad.parameters.onset = 0.8  # Fixed onset threshold
+    config.diarizer.vad.parameters.offset = 0.6  # Fixed offset threshold
     config.diarizer.vad.parameters.pad_offset = -0.05
-    config.diarizer.msdd_model.model_path = (
-        "diar_msdd_telephonic"  # Telephonic speaker diarization model
+
+    # Use telephonic-specific MSDD model
+    config.diarizer.msdd_model.model_path = "diar_msdd_telephonic"
+
+    # Optionally, set clustering seed if supported
+    config.diarizer.clustering.seed = (
+        42  # Fixed seed for reproducible clustering results
     )
 
     return config
@@ -457,7 +467,6 @@ def format_transcript(text):
 
     # Join the cleaned lines back together, preserving new lines between speakers
     return "\n".join(cleaned_lines)
-
 
 
 def get_realigned_ws_mapping_with_punctuation(
