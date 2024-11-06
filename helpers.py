@@ -353,25 +353,50 @@ def format_transcript(text):
     """
 
     def fix_email_address(line):
-        """Handle email addresses with more precise pattern matching"""
-        # Only convert 'at' to '@' if it's between email-like patterns
+        """
+        Handle email addresses with more precise pattern matching.
+        Only converts 'at' to '@' in valid email contexts.
+        """
         email_patterns = [
+            # Pattern 1: Matches standard email format with strict username requirements
             (
-                r"(\b[A-Za-z0-9._%+-]+)\s+at\s+([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b",
+                r"(\b[A-Za-z0-9][A-Za-z0-9._%+-]*)\s+at\s+([A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,})\b",
                 r"\1@\2",
             ),
+            # Pattern 2: Matches email with subdomain, requiring valid email characters
             (
-                r"(\b[A-Za-z0-9._%+-]+)\s+at\s+([A-Za-z0-9.-]+)\s*\.\s*([A-Za-z]{2,})\b",
+                r"(\b[A-Za-z0-9][A-Za-z0-9._%+-]*)\s+at\s+([A-Za-z0-9][A-Za-z0-9.-]*)\s*\.\s*([A-Za-z]{2,})\b",
                 r"\1@\2.\3",
             ),
+            # Pattern 3: Matches common email providers specifically
             (
-                r"(\b[A-Za-z0-9._%+-]+)\s+at\s+(gmail|yahoo|hotmail|outlook)\s*\.\s*(com|net|org)\b",
+                r"(\b[A-Za-z0-9][A-Za-z0-9._%+-]*)\s+at\s+(gmail|yahoo|hotmail|outlook)\s*\.\s*(com|net|org)\b",
                 r"\1@\2.\3",
             ),
         ]
 
+        # Additional check to prevent false positives
+        def is_likely_email(match):
+            # Check if the first part looks like a valid email username
+            username = match.group(1)
+            # Username should:
+            # 1. Not be a common word
+            common_words = {'there', 'here', 'get', 'look', 'what', 'where', 'then', 'this', 'that'}
+            # 2. Have characteristics of email usernames
+            return (
+                username.lower() not in common_words and
+                len(username) >= 2 and
+                not username.endswith('.') and
+                not username.startswith('.')
+            )
+
         for pattern, replacement in email_patterns:
-            line = re.sub(pattern, replacement, line, flags=re.IGNORECASE)
+            line = re.sub(
+                pattern,
+                lambda m: replacement % m.groups() if is_likely_email(m) else m.group(0),
+                line,
+                flags=re.IGNORECASE
+            )
         return line
 
     # Split text into lines while preserving empty lines
@@ -430,13 +455,9 @@ def format_transcript(text):
 
         cleaned_lines.append(line)
 
-    # Join lines and ensure single newline between speakers
-    formatted_text = "\n".join(line for line in cleaned_lines if line.strip())
+    # Join the cleaned lines back together, preserving new lines between speakers
+    return "\n".join(cleaned_lines)
 
-    # Final cleanup: remove any double newlines and ensure proper spacing
-    formatted_text = re.sub(r"\n\s*\n+", "\n", formatted_text)
-
-    return formatted_text
 
 
 def get_realigned_ws_mapping_with_punctuation(
