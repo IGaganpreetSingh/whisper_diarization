@@ -181,12 +181,12 @@ word_timestamps = postprocess_results(text_starred, spans, stride, scores)
 ROOT = os.getcwd()
 temp_path = os.path.join(ROOT, "temp_outputs")
 os.makedirs(temp_path, exist_ok=True)
-# torchaudio.save(
-#     os.path.join(temp_path, "mono_file.wav"),
-#     audio_waveform.cpu().unsqueeze(0).float(),
-#     16000,
-#     channels_first=True,
-# )
+torchaudio.save(
+    os.path.join(temp_path, "mono_file.wav"),
+    audio_waveform.cpu().unsqueeze(0).float(),
+    16000,
+    channels_first=True,
+)
 
 
 # Initialize NeMo MSDD diarization model
@@ -201,28 +201,25 @@ torch.cuda.empty_cache()
 # Reading timestamps <> Speaker Labels mapping
 speaker_ts = []
 speaker_id_map = {}
-next_id = 1
 
-# Step 1: Read all lines and map original speaker IDs
+# Step 1: Read lines and collect unique speaker IDs
 with open(os.path.join(temp_path, "pred_rttms", "mono_file.rttm"), "r") as f:
     lines = f.readlines()
+    unique_ids = set()
+
     for line in lines:
         line_list = line.split(" ")
         s = int(float(line_list[5]) * 1000)
         e = s + int(float(line_list[8]) * 1000)
         original_id = int(line_list[11].split("_")[-1])
+        unique_ids.add(original_id)
 
-        # Add to the map if original_id is new, but don't assign next_id yet
-        if original_id not in speaker_id_map:
-            speaker_id_map[original_id] = None  # Placeholder
+    # Step 2: Sort unique IDs and assign sequential IDs
+    sorted_ids = sorted(unique_ids)
+    for idx, original_id in enumerate(sorted_ids, start=1):
+        speaker_id_map[original_id] = idx
 
-# Step 2: Sort original IDs and assign sequential IDs
-sorted_original_ids = sorted(speaker_id_map.keys())
-for original_id in sorted_original_ids:
-    speaker_id_map[original_id] = next_id
-    next_id += 1
-
-# Step 3: Create speaker_ts with consistent new IDs
+# Step 3: Create `speaker_ts` with the new sequential mapping
 for line in lines:
     line_list = line.split(" ")
     s = int(float(line_list[5]) * 1000)
