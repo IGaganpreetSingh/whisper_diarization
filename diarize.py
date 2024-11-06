@@ -31,8 +31,23 @@ from helpers import (
     format_transcript,
 )
 from transcription_helpers import transcribe_batched
+import numpy as np
+import random
 
-mtypes = {"cpu": "int8", "cuda": "float32"}
+def set_seed(seed=42):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.use_deterministic_algorithms(True)
+
+
+# Call this function once at the beginning
+set_seed()
+
+mtypes = {"cpu": "int8", "cuda": "float16"}
 
 # Initialize parser
 parser = argparse.ArgumentParser()
@@ -176,6 +191,8 @@ os.makedirs(temp_path, exist_ok=True)
 
 # Initialize NeMo MSDD diarization model
 msdd_model = NeuralDiarizer(cfg=create_config(temp_path)).to(args.device)
+# Set to evaluation mode for consistent inference
+msdd_model.eval()
 msdd_model.diarize()
 
 del msdd_model
