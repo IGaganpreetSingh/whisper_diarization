@@ -353,70 +353,30 @@ def get_last_word_idx_of_sentence(word_idx, word_list, max_words):
 
 
 def format_transcript(text):
-    """
-    Format transcript text with proper spacing, capitalization, and email handling.
-
-    Args:
-        text (str): Input transcript text
-    Returns:
-        str: Formatted transcript text
-    """
-
-    # Split text into lines while preserving empty lines
+    # Preserve speaker labels by splitting by new lines
     lines = text.split("\n")
     cleaned_lines = []
 
     for line in lines:
-        if not line.strip():
-            cleaned_lines.append(line)
-            continue
+        # Replace multiple spaces with a single space
+        line = re.sub(r"\s+", " ", line)
+        # Ensure only one space after periods and question marks, except for ellipsis
+        line = re.sub(r"(?<!\.)\.(?!\.)\s+", ". ", line)
+        line = re.sub(r"\?\s+", "? ", line)
+        line = re.sub(r"!\s+", "! ", line)
 
-        # Basic cleanup
-        line = re.sub(r"\s+", " ", line.strip())  # Remove extra spaces
+        # line = re.sub(r"(\w+) at (\w+\.\w+)", r"\1@\2", line)
+        # line = re.sub(r"(\w+) at (\w+)\s*\.\s*(\w+)", r"\1@\2.\3", line)
+        line = re.sub(r"(\d+)\s*-\s*(\d+)\s*-\s*(\d+)", r"\1-\2-\3", line)
+        # Use re.sub to remove all occurrences of "..."
+        line = re.sub(r"\.\.\.", "", line)
 
-        # Handle punctuation spacing
-        punctuation_fixes = [
-            (r"(?<!\.)\.(?!\.)\s+", ". "),  # Periods (not ellipsis)
-            (r"\?\s+", "? "),  # Question marks
-            (r"!\s+", "! "),  # Exclamation marks
-            (r",\s+", ", "),  # Commas
-            (r";\s+", "; "),  # Semicolons
-            (r":\s+", ": "),  # Colons (except in speaker labels)
-        ]
-
-        for pattern, replacement in punctuation_fixes:
-            line = re.sub(pattern, replacement, line)
-
-        # Handle specific patterns
+        # Capitalize the first letter of the sentence after a speaker label
         line = re.sub(
-            r"(\w+) at (\w+)\s*\.\s*(\w+)", r"\1@\2.\3", line
-        )  # Handle email addresses
-        line = re.sub(
-            r"(\d+)\s*-\s*(\d+)\s*-\s*(\d+)", r"\1-\2-\3", line
-        )  # Fix date formats
-        line = re.sub(r"\.\.\.", "(indistinct)", line)  # Replace ellipsis
-
-        # Special handling for speaker labels and capitalization
-        if re.match(r"^Speaker \d+:", line):
-            # Capitalize first letter after speaker label
-            line = re.sub(
-                r"(^Speaker \d+:)\s*(\w)",
-                lambda x: f"{x.group(1)} {x.group(2).upper()}",
-                line,
-            )
-
-            # Handle empty speaker segments
-            if line.endswith(":") or line.endswith(": "):
-                line = f"{line.strip()} (indistinct)"
-
-        # Ensure proper spacing after speaker labels
-        line = re.sub(r"(Speaker \d+:)\s+", r"\1 ", line)
-
-        # Fix multiple periods
-        line = re.sub(r"\.+", ".", line)
-
-        # Remove spaces before punctuation
-        line = re.sub(r"\s+([.,!?])", r"\1", line)
+            r"(^Speaker \d+:)\s*(\w)",
+            lambda x: x.group(1) + " " + x.group(2).upper(),
+            line,
+        )
 
         cleaned_lines.append(line)
 
