@@ -372,6 +372,7 @@ def format_transcript(text):
         line = re.sub(r"\.\.\.", "", line)
         line = re.sub(r'(\d{1,3}(,\d{3})*(\.\d+)?)[ ]+(?<!\w)rand\b(?!\w)', r'R\1', line, flags=re.IGNORECASE)
         line = re.sub(r"\b(my|My)\s+lord\b", r"M'Lord", line, flags=re.IGNORECASE)
+        line = re.sub(r"\b(my|My)\s+lady\b", r"M'Lady", line, flags=re.IGNORECASE)
         # Capitalize the first letter of the sentence after a speaker label
         line = re.sub(
             r"(^Speaker \d+:)\s*(\w)",
