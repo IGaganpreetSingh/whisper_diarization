@@ -220,7 +220,7 @@ langs_to_iso = {
 
 
 def create_config(output_dir):
-    DOMAIN_TYPE = "telephonic"  # Can be meeting, telephonic, or general based on domain type of the audio file
+    DOMAIN_TYPE = "telephonic"
     CONFIG_LOCAL_DIRECTORY = "nemo_msdd_configs"
     CONFIG_FILE_NAME = f"diar_infer_{DOMAIN_TYPE}.yaml"
     MODEL_CONFIG_PATH = os.path.join(CONFIG_LOCAL_DIRECTORY, CONFIG_FILE_NAME)
@@ -248,6 +248,7 @@ def create_config(output_dir):
         "rttm_filepath": None,
         "uem_filepath": None,
     }
+
     # Write input manifest for diarization
     with open(os.path.join(data_dir, "input_manifest.json"), "w") as fp:
         json.dump(meta, fp)
@@ -257,28 +258,61 @@ def create_config(output_dir):
     pretrained_vad = "vad_multilingual_marblenet"
     pretrained_speaker_model = "titanet_large"
 
-    # Configuration adjustments for deterministic output
-    config.num_workers = 0  # Single-threaded to reduce randomness
+    # Basic configurations
+    config.num_workers = 0
     config.diarizer.manifest_filepath = os.path.join(data_dir, "input_manifest.json")
-    config.diarizer.out_dir = output_dir  # For intermediate and prediction output
+    config.diarizer.out_dir = output_dir
 
+    # === Minimal changes for overlap detection ===
+    # Enable overlap detection
+    config.diarizer.ignore_overlap = False
+
+    # Keep the default speaker embeddings but ensure multiscale is enabled
     config.diarizer.speaker_embeddings.model_path = pretrained_speaker_model
-    config.diarizer.oracle_vad = False  # Use VAD model instead of oracle VAD
-    config.diarizer.clustering.parameters.oracle_num_speakers = False
+    config.diarizer.speaker_embeddings.parameters.window_length_in_sec = [
+        1.5,
+        1.25,
+        1.0,
+        0.75,
+        0.5,
+    ]
+    config.diarizer.speaker_embeddings.parameters.shift_length_in_sec = [
+        0.75,
+        0.625,
+        0.5,
+        0.375,
+        0.25,
+    ]
+    config.diarizer.speaker_embeddings.parameters.multiscale_weights = [1, 1, 1, 1, 1]
 
-    # Set deterministic VAD parameters
+    # Slightly adjust MSDD parameters for better overlap detection
+    config.diarizer.msdd_model.model_path = "diar_msdd_telephonic"
+    config.diarizer.msdd_model.parameters.use_speaker_model_from_ckpt = True
+    config.diarizer.msdd_model.parameters.sigmoid_threshold = [
+        0.5
+    ]  # Slightly lower threshold for better overlap detection
+    config.diarizer.msdd_model.parameters.overlap_infer_spk_limit = (
+        8  # Increased from 5
+    )
+    config.diarizer.msdd_model.parameters.diar_window_length = 50  # Keep default
+    config.diarizer.msdd_model.parameters.split_infer = True
+
+    # Keep the default VAD parameters as they work well
     config.diarizer.vad.model_path = pretrained_vad
-    config.diarizer.vad.parameters.onset = 0.8  # Fixed onset threshold
-    config.diarizer.vad.parameters.offset = 0.6  # Fixed offset threshold
+    config.diarizer.vad.parameters.onset = 0.8
+    config.diarizer.vad.parameters.offset = 0.6
     config.diarizer.vad.parameters.pad_offset = -0.05
 
-    # Use telephonic-specific MSDD model
-    config.diarizer.msdd_model.model_path = "diar_msdd_telephonic"
-
-    # Optionally, set clustering seed if supported
-    config.diarizer.clustering.seed = (
-        42  # Fixed seed for reproducible clustering results
+    # Minor clustering adjustments
+    config.diarizer.clustering.parameters.oracle_num_speakers = False
+    config.diarizer.clustering.parameters.max_num_speakers = 8
+    config.diarizer.clustering.parameters.enhanced_count_thres = 80
+    config.diarizer.clustering.parameters.maj_vote_spk_count = (
+        True  # Enable majority voting
     )
+
+    # Set clustering seed for reproducibility
+    config.diarizer.clustering.seed = 42
 
     return config
 
