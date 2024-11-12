@@ -5,7 +5,8 @@ import re
 import io
 import torch
 import torchaudio
-
+import librosa
+import soundfile as sf
 from ctc_forced_aligner import (
     generate_emissions,
     get_alignments,
@@ -29,6 +30,7 @@ from helpers import (
     punct_model_langs,
     whisper_langs,
     format_transcript,
+    write_srt,
 )
 from transcription_helpers import transcribe_batched
 import random
@@ -126,7 +128,97 @@ os.makedirs(nemo_temp_path, exist_ok=True)
 
 language = process_language_arg(args.language, args.model_name)
 
+
+def enhance_vocals(audio_path, output_path, volume_boost_db=6.0):
+    """
+    Enhance the isolated vocals:
+    1. Apply volume boost
+    2. Normalize audio
+    3. Apply subtle compression
+    """
+    # Load the audio file
+    audio, sr = librosa.load(audio_path, sr=None)
+
+    # Normalize audio first
+    audio_norm = librosa.util.normalize(audio)
+
+    # Calculate volume boost factor (converting from dB)
+    boost_factor = np.power(10.0, volume_boost_db / 20.0)
+
+    # Apply volume boost
+    audio_boosted = audio_norm * boost_factor
+
+    # Apply compression (subtle)
+    def compress(signal, threshold=0.3, ratio=2.0):
+        compressed = np.zeros_like(signal)
+        for i, sample in enumerate(signal):
+            if abs(sample) > threshold:
+                if sample > 0:
+                    compressed[i] = threshold + (sample - threshold) / ratio
+                else:
+                    compressed[i] = -(threshold + (abs(sample) - threshold) / ratio)
+            else:
+                compressed[i] = sample
+        return compressed
+
+    audio_compressed = compress(audio_boosted)
+
+    # Final normalization to prevent clipping
+    audio_final = librosa.util.normalize(audio_compressed)
+
+    # Save the enhanced audio
+    sf.write(output_path, audio_final, sr)
+    return output_path
+
+
 # Update the demucs command to use the job-specific directory
+import librosa
+import soundfile as sf
+import numpy as np
+
+
+def enhance_vocals(audio_path, output_path, volume_boost_db=6.0):
+    """
+    Enhance the isolated vocals:
+    1. Apply volume boost
+    2. Normalize audio
+    3. Apply subtle compression
+    """
+    # Load the audio file
+    audio, sr = librosa.load(audio_path, sr=None)
+
+    # Normalize audio first
+    audio_norm = librosa.util.normalize(audio)
+
+    # Calculate volume boost factor (converting from dB)
+    boost_factor = np.power(10.0, volume_boost_db / 20.0)
+
+    # Apply volume boost
+    audio_boosted = audio_norm * boost_factor
+
+    # Apply compression (subtle)
+    def compress(signal, threshold=0.3, ratio=2.0):
+        compressed = np.zeros_like(signal)
+        for i, sample in enumerate(signal):
+            if abs(sample) > threshold:
+                if sample > 0:
+                    compressed[i] = threshold + (sample - threshold) / ratio
+                else:
+                    compressed[i] = -(threshold + (abs(sample) - threshold) / ratio)
+            else:
+                compressed[i] = sample
+        return compressed
+
+    audio_compressed = compress(audio_boosted)
+
+    # Final normalization to prevent clipping
+    audio_final = librosa.util.normalize(audio_compressed)
+
+    # Save the enhanced audio
+    sf.write(output_path, audio_final, sr)
+    return output_path
+
+# Insert this in your main code after the Demucs separation
 if args.stemming:
     return_code = os.system(
         f'python -m demucs.separate -n htdemucs --two-stems=vocals "{args.audio}" -o "{temp_outputs}"'
@@ -137,11 +229,21 @@ if args.stemming:
         )
         vocal_target = args.audio
     else:
-        vocal_target = os.path.join(
+        vocals_path = os.path.join(
             temp_outputs,
             "htdemucs",
             os.path.splitext(os.path.basename(args.audio))[0],
             "vocals.wav",
+        )
+        # Add vocal enhancement step
+        enhanced_vocals_path = os.path.join(
+            temp_outputs,
+            "htdemucs",
+            os.path.splitext(os.path.basename(args.audio))[0],
+            "vocals_enhanced.wav",
+        )
+        vocal_target = enhance_vocals(
+            vocals_path, enhanced_vocals_path, volume_boost_db=6.0
         )
 else:
     vocal_target = args.audio
@@ -273,22 +375,33 @@ ssm = get_sentences_speaker_mapping(wsm, speaker_ts)
 
 # Capture the transcript in memory first
 transcript_io = io.StringIO()
+srt_io = io.StringIO()
 
-# Generate speaker-aware transcript
+# Generate speaker-aware transcript and SRT content
 get_speaker_aware_transcript(ssm, transcript_io)
+write_srt(ssm, srt_io)
 
-# Retrieve the transcript text from the in-memory object
+# Retrieve the content from in-memory objects
 transcript_txt = transcript_io.getvalue()
+srt_txt = srt_io.getvalue()
 
-# Apply the cleanup function
-formated_transcript_txt = format_transcript(transcript_txt)
+# Apply the cleanup functions
+formatted_transcript_txt = format_transcript(transcript_txt)
+formatted_srt_txt = format_transcript(srt_txt)  # You'll need to implement this function
 
-# Write output to the specified directory
-output_path = os.path.join(
+# Write transcript output to the specified directory
+transcript_output_path = os.path.join(
     args.temp_dir, f"{os.path.splitext(os.path.basename(args.audio))[0]}.txt"
 )
-with open(output_path, "w", encoding="utf-8-sig") as f:
-    f.write(formated_transcript_txt)
+with open(transcript_output_path, "w", encoding="utf-8-sig") as f:
+    f.write(formatted_transcript_txt)
+
+# Write SRT output to the specified directory
+srt_output_path = os.path.join(
+    args.temp_dir, f"{os.path.splitext(os.path.basename(args.audio))[0]}.srt"
+)
+with open(srt_output_path, "w", encoding="utf-8-sig") as f:
+    f.write(formatted_srt_txt)
 
 # Clean up temporary files
 cleanup(temp_outputs)
