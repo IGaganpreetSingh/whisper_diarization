@@ -21,8 +21,11 @@ class TranscriptionProgress:
         self.current_stage = "initializing"
         self.progress = 0
         self.stages = {
-            "initializing": (0, 5),
-            "source_separation": (5, 20),
+            "initializing": (0, 2),
+            "source_separation_start": (2, 5),
+            "source_separation_model_loading": (5, 7),
+            "source_separation_processing": (7, 16),
+            "source_separation_enhancing": (16, 20),
             "transcription": (20, 50),
             "alignment": (50, 70),
             "diarization": (70, 90),

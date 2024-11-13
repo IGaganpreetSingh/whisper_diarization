@@ -170,37 +170,53 @@ language = process_language_arg(args.language, args.model_name)
 update_progress(args.job_id, "initializing", 100)
 
 # Source separation stage
-update_progress(args.job_id, "source_separation", 0)
-if args.stemming:
-    return_code = os.system(
-        f'python -m demucs.separate -n htdemucs --two-stems=vocals "{args.audio}" -o "{temp_outputs}"'
-    )
-    update_progress(args.job_id, "source_separation", 10)
+if args.job_id:
+    update_progress(args.job_id, "source_separation_start", 0)
 
-    if return_code != 0:
-        logging.warning(
-            "Source splitting failed, using original audio file. Use --no-stem argument to disable it."
+if args.stemming:
+    try:
+        if args.job_id:
+            update_progress(args.job_id, "source_separation_model_loading", 50)
+
+        return_code = os.system(
+            f'python -m demucs.separate -n htdemucs --two-stems=vocals "{args.audio}" -o "{temp_outputs}"'
         )
+
+        if return_code != 0:
+            logging.warning(
+                "Source splitting failed, using original audio file. Use --no-stem argument to disable it."
+            )
+            vocal_target = args.audio
+        else:
+            if args.job_id:
+                update_progress(args.job_id, "source_separation_in_progress", 50)
+
+            vocals_path = os.path.join(
+                temp_outputs,
+                "htdemucs",
+                os.path.splitext(os.path.basename(args.audio))[0],
+                "vocals.wav",
+            )
+
+            if args.job_id:
+                update_progress(args.job_id, "source_separation_enhancing", 0)
+
+            # Add vocal enhancement step
+            enhanced_vocals_path = os.path.join(
+                temp_outputs,
+                "htdemucs",
+                os.path.splitext(os.path.basename(args.audio))[0],
+                "vocals_enhanced.wav",
+            )
+            vocal_target = enhance_vocals(
+                vocals_path, enhanced_vocals_path, volume_boost_db=6.0
+            )
+
+            if args.job_id:
+                update_progress(args.job_id, "source_separation_enhancing", 100)
+    except Exception as e:
+        logging.error(f"Error in source separation: {str(e)}")
         vocal_target = args.audio
-    else:
-        vocals_path = os.path.join(
-            temp_outputs,
-            "htdemucs",
-            os.path.splitext(os.path.basename(args.audio))[0],
-            "vocals.wav",
-        )
-        update_progress(args.job_id, "source_separation", 70)
-        # Add vocal enhancement step
-        enhanced_vocals_path = os.path.join(
-            temp_outputs,
-            "htdemucs",
-            os.path.splitext(os.path.basename(args.audio))[0],
-            "vocals_enhanced.wav",
-        )
-        vocal_target = enhance_vocals(
-            vocals_path, enhanced_vocals_path, volume_boost_db=6.0
-        )
-        update_progress(args.job_id, "source_separation", 100)
 else:
     vocal_target = args.audio
 
