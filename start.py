@@ -1,16 +1,67 @@
 import os
+import json
+import time
 from fastapi import FastAPI, File, UploadFile, Form, BackgroundTasks
 from fastapi.responses import FileResponse, JSONResponse
 import subprocess
 import torch
 import uuid
 from pathlib import Path
+import sys
 from helpers import cleanup
 
 app = FastAPI()
 
 # Dictionary to store job statuses
 job_statuses = {}
+
+
+class TranscriptionProgress:
+    def __init__(self):
+        self.current_stage = "initializing"
+        self.progress = 0
+        self.stages = {
+            "initializing": (0, 5),
+            "source_separation": (5, 20),
+            "transcription": (20, 50),
+            "alignment": (50, 70),
+            "diarization": (70, 90),
+            "finalizing": (90, 100),
+        }
+
+    def update_stage(self, stage: str, sub_progress: float = 0):
+        """
+        Update the current stage and calculate overall progress
+
+        :param stage: Current processing stage
+        :param sub_progress: Progress within the current stage (0-100)
+        """
+        if stage not in self.stages:
+            return
+
+        self.current_stage = stage
+        stage_start, stage_end = self.stages[stage]
+        stage_range = stage_end - stage_start
+        self.progress = stage_start + (stage_range * (sub_progress / 100))
+
+    def get_status(self):
+        return {
+            "status": "processing",
+            "stage": self.current_stage,
+            "progress": round(self.progress, 2),
+        }
+
+    def get(self, key, default=None):
+        if key == "canceled":
+            return default
+        if key == "status":
+            return "processing"
+        if key == "stage":
+            return self.current_stage
+        if key == "progress":
+            return round(self.progress, 2)
+        return default
+
 
 # Create a base directory for all temporary files
 BASE_TEMP_DIR = Path("temp_processing")
@@ -46,6 +97,9 @@ def process_audio(
         job_dir = get_job_dir(job_id)
         output_base = os.path.splitext(audio_path)[0]
 
+        progress_tracker = TranscriptionProgress()
+        job_statuses[job_id] = progress_tracker
+
         command = [
             "python",
             "transcribe.py",
@@ -57,7 +111,10 @@ def process_audio(
             device,
             "--temp-dir",
             str(job_dir),
+            "--job-id",
+            job_id,
         ]
+
         if language:
             command.extend(["--language", language])
         if suppress_numerals:
@@ -65,22 +122,69 @@ def process_audio(
         if not stem:
             command.append("--no-stem")
 
-        # Start the transcription as a subprocess
-        process = subprocess.Popen(command)
+        # Start the process with pipe for output
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            bufsize=1,
+        )
 
-        # Periodically check if the job was canceled
-        while process.poll() is None:
-            if job_statuses[job_id].get("canceled"):
-                process.terminate()  # Stop the subprocess if canceled
-                job_statuses[job_id] = {"status": "canceled"}  # Update status
-                cleanup(str(job_dir))  # Call your cleanup function
-                return  # Exit the function to skip further processing
-        process.wait()  # Ensure the process finishes
+        # Handle output and progress in real-time
+        while True:
+            # Read output
+            output = process.stdout.readline()
+            error = process.stderr.readline()
 
-        # If not canceled, proceed with file handling
+            # Print output in real-time
+            if output:
+                print(output.strip())
+            if error:
+                print(error.strip(), file=sys.stderr)
+
+            # Check if process has finished
+            if process.poll() is not None:
+                # Read any remaining output
+                for output in process.stdout.readlines():
+                    if output:
+                        print(output.strip())
+                for error in process.stderr.readlines():
+                    if error:
+                        print(error.strip(), file=sys.stderr)
+                break
+
+            # Check for progress updates
+            progress_file = os.path.join(job_dir, f"{job_id}_progress.json")
+            if os.path.exists(progress_file):
+                try:
+                    with open(progress_file, "r") as f:
+                        progress_data = json.load(f)
+                        progress_tracker.update_stage(
+                            progress_data["stage"], progress_data["sub_progress"]
+                        )
+                except Exception as e:
+                    print(f"Failed to read progress: {str(e)}")
+
+            # Check for cancellation
+            if isinstance(job_statuses[job_id], dict) and job_statuses[job_id].get(
+                "canceled"
+            ):
+                process.terminate()
+                job_statuses[job_id] = {"status": "canceled", "progress": 0}
+                cleanup(str(job_dir))
+                return
+
+            time.sleep(0.1)  # Small delay to prevent CPU overuse
+
+        # Check process output
+        if process.returncode != 0:
+            raise subprocess.CalledProcessError(process.returncode, command)
+
         output_file = f"{output_base}.txt"
         if os.path.exists(output_file):
             import shutil
+
             final_output = job_dir / "results" / "transcription.txt"
             results_dir = job_dir / "results"
             results_dir.mkdir(exist_ok=True)
@@ -89,16 +193,19 @@ def process_audio(
             job_statuses[job_id] = {
                 "status": "completed",
                 "output_file": str(final_output),
+                "progress": 100,
             }
         else:
-            # Handle missing file without error if canceled
-            if not job_statuses[job_id].get("canceled"):
+            if not (
+                isinstance(job_statuses[job_id], dict)
+                and job_statuses[job_id].get("canceled")
+            ):
                 raise FileNotFoundError("Transcription output file not found")
 
     except Exception as e:
-        job_statuses[job_id] = {"status": "failed", "error": str(e)}
+        job_statuses[job_id] = {"status": "failed", "error": str(e), "progress": 0}
+        print(f"Error in process_audio: {str(e)}", file=sys.stderr)
     finally:
-        # Clean up the audio file after processing
         if os.path.exists(audio_path):
             os.remove(audio_path)
 
@@ -129,8 +236,8 @@ async def transcribe(
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Set initial job status
-    job_statuses[job_id] = {"status": "processing"}
+    # Create progress tracker
+    job_statuses[job_id] = TranscriptionProgress()
 
     # Start the background task
     background_tasks.add_task(
@@ -151,7 +258,11 @@ async def transcribe(
 async def get_status(job_id: str):
     if job_id not in job_statuses:
         return JSONResponse({"status": "not_found"}, status_code=404)
-    return JSONResponse(job_statuses[job_id])
+
+    status = job_statuses[job_id]
+    if isinstance(status, TranscriptionProgress):
+        return JSONResponse(status.get_status())
+    return JSONResponse(status)
 
 
 @app.get("/result/{job_id}")
@@ -160,6 +271,9 @@ async def get_result(job_id: str, background_tasks: BackgroundTasks):
         return JSONResponse({"status": "not_found"}, status_code=404)
 
     job_status = job_statuses[job_id]
+    if isinstance(job_status, TranscriptionProgress):
+        return JSONResponse({"status": "processing"}, status_code=400)
+
     if job_status["status"] != "completed":
         return JSONResponse({"status": job_status["status"]}, status_code=400)
 
@@ -180,7 +294,13 @@ async def get_result(job_id: str, background_tasks: BackgroundTasks):
 async def cancel_transcription(job_id: str):
     if job_id not in job_statuses:
         return JSONResponse({"status": "not_found"}, status_code=404)
-    job_statuses[job_id]["canceled"] = True
+
+    # Handle both progress tracker and dictionary cases
+    if isinstance(job_statuses[job_id], TranscriptionProgress):
+        job_statuses[job_id] = {"status": "canceled", "progress": 0}
+    else:
+        job_statuses[job_id]["canceled"] = True
+
     return JSONResponse({"status": "canceled"})
 
 

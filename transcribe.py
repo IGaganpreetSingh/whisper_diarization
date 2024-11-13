@@ -7,6 +7,7 @@ import torch
 import torchaudio
 import librosa
 import soundfile as sf
+import json
 from ctc_forced_aligner import (
     generate_emissions,
     get_alignments,
@@ -36,6 +37,20 @@ from transcription_helpers import transcribe_batched
 import random
 import numpy as np
 
+
+def update_progress(job_id, stage, sub_progress=0):
+    """Update progress through file system"""
+    if not job_id:
+        return
+
+    progress_file = os.path.join(args.temp_dir, f"{job_id}_progress.json")
+    try:
+        with open(progress_file, "w") as f:
+            json.dump({"stage": stage, "sub_progress": sub_progress}, f)
+    except Exception as e:
+        logging.warning(f"Failed to update progress: {str(e)}")
+
+
 def set_seed(seed=42):
     """
     Set seeds for reproducibility with a balance of practicality.
@@ -44,18 +59,39 @@ def set_seed(seed=42):
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
     random.seed(seed)
-
-    # Set CUDA deterministic settings
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-
-    # Instead of strict deterministic algorithms, use warning mode
     if hasattr(torch, "use_deterministic_algorithms"):
         torch.use_deterministic_algorithms(False)
 
 
-# Call this function once at the beginning
 set_seed()
+
+
+def enhance_vocals(audio_path, output_path, volume_boost_db=6.0):
+    """Enhance the isolated vocals"""
+    audio, sr = librosa.load(audio_path, sr=None)
+    audio_norm = librosa.util.normalize(audio)
+    boost_factor = np.power(10.0, volume_boost_db / 20.0)
+    audio_boosted = audio_norm * boost_factor
+
+    def compress(signal, threshold=0.3, ratio=2.0):
+        compressed = np.zeros_like(signal)
+        for i, sample in enumerate(signal):
+            if abs(sample) > threshold:
+                if sample > 0:
+                    compressed[i] = threshold + (sample - threshold) / ratio
+                else:
+                    compressed[i] = -(threshold + (abs(sample) - threshold) / ratio)
+            else:
+                compressed[i] = sample
+        return compressed
+
+    audio_compressed = compress(audio_boosted)
+    audio_final = librosa.util.normalize(audio_compressed)
+    sf.write(output_path, audio_final, sr)
+    return output_path
+
 
 mtypes = {"cpu": "int8", "cuda": "float16"}
 
@@ -115,6 +151,7 @@ parser.add_argument(
 parser.add_argument(
     "--temp-dir", type=str, help="Directory for temporary files", required=True
 )
+parser.add_argument("--job-id", type=str, help="Job ID for progress tracking")
 
 args = parser.parse_args()
 
@@ -126,103 +163,20 @@ os.makedirs(temp_outputs, exist_ok=True)
 nemo_temp_path = os.path.join(temp_outputs, "nemo")
 os.makedirs(nemo_temp_path, exist_ok=True)
 
+# Start progress tracking
+update_progress(args.job_id, "initializing", 0)
+
 language = process_language_arg(args.language, args.model_name)
+update_progress(args.job_id, "initializing", 100)
 
-
-def enhance_vocals(audio_path, output_path, volume_boost_db=6.0):
-    """
-    Enhance the isolated vocals:
-    1. Apply volume boost
-    2. Normalize audio
-    3. Apply subtle compression
-    """
-    # Load the audio file
-    audio, sr = librosa.load(audio_path, sr=None)
-
-    # Normalize audio first
-    audio_norm = librosa.util.normalize(audio)
-
-    # Calculate volume boost factor (converting from dB)
-    boost_factor = np.power(10.0, volume_boost_db / 20.0)
-
-    # Apply volume boost
-    audio_boosted = audio_norm * boost_factor
-
-    # Apply compression (subtle)
-    def compress(signal, threshold=0.3, ratio=2.0):
-        compressed = np.zeros_like(signal)
-        for i, sample in enumerate(signal):
-            if abs(sample) > threshold:
-                if sample > 0:
-                    compressed[i] = threshold + (sample - threshold) / ratio
-                else:
-                    compressed[i] = -(threshold + (abs(sample) - threshold) / ratio)
-            else:
-                compressed[i] = sample
-        return compressed
-
-    audio_compressed = compress(audio_boosted)
-
-    # Final normalization to prevent clipping
-    audio_final = librosa.util.normalize(audio_compressed)
-
-    # Save the enhanced audio
-    sf.write(output_path, audio_final, sr)
-    return output_path
-
-
-# Update the demucs command to use the job-specific directory
-import librosa
-import soundfile as sf
-import numpy as np
-
-
-def enhance_vocals(audio_path, output_path, volume_boost_db=6.0):
-    """
-    Enhance the isolated vocals:
-    1. Apply volume boost
-    2. Normalize audio
-    3. Apply subtle compression
-    """
-    # Load the audio file
-    audio, sr = librosa.load(audio_path, sr=None)
-
-    # Normalize audio first
-    audio_norm = librosa.util.normalize(audio)
-
-    # Calculate volume boost factor (converting from dB)
-    boost_factor = np.power(10.0, volume_boost_db / 20.0)
-
-    # Apply volume boost
-    audio_boosted = audio_norm * boost_factor
-
-    # Apply compression (subtle)
-    def compress(signal, threshold=0.3, ratio=2.0):
-        compressed = np.zeros_like(signal)
-        for i, sample in enumerate(signal):
-            if abs(sample) > threshold:
-                if sample > 0:
-                    compressed[i] = threshold + (sample - threshold) / ratio
-                else:
-                    compressed[i] = -(threshold + (abs(sample) - threshold) / ratio)
-            else:
-                compressed[i] = sample
-        return compressed
-
-    audio_compressed = compress(audio_boosted)
-
-    # Final normalization to prevent clipping
-    audio_final = librosa.util.normalize(audio_compressed)
-
-    # Save the enhanced audio
-    sf.write(output_path, audio_final, sr)
-    return output_path
-
-# Insert this in your main code after the Demucs separation
+# Source separation stage
+update_progress(args.job_id, "source_separation", 0)
 if args.stemming:
     return_code = os.system(
         f'python -m demucs.separate -n htdemucs --two-stems=vocals "{args.audio}" -o "{temp_outputs}"'
     )
+    update_progress(args.job_id, "source_separation", 50)
+
     if return_code != 0:
         logging.warning(
             "Source splitting failed, using original audio file. Use --no-stem argument to disable it."
@@ -258,8 +212,10 @@ whisper_results, language, audio_waveform = transcribe_batched(
     args.suppress_numerals,
     args.device,
 )
+update_progress(args.job_id, "transcription", 100)
 
-# Forced Alignment
+# Alignment stage
+update_progress(args.job_id, "alignment", 0)
 alignment_model, alignment_tokenizer = load_alignment_model(
     args.device,
     dtype=torch.float16 if args.device == "cuda" else torch.float32,
@@ -294,8 +250,12 @@ segments, scores, blank_token = get_alignments(
 spans = get_spans(tokens_starred, segments, blank_token)
 
 word_timestamps = postprocess_results(text_starred, spans, stride, scores)
+update_progress(args.job_id, "alignment", 100)
 
-# Save mono audio for NeMo in the NeMo-specific temp directory
+# Before diarization
+update_progress(args.job_id, "diarization", 0)
+
+# Save mono audio
 mono_path = os.path.join(nemo_temp_path, "mono_file.wav")
 torchaudio.save(
     mono_path,
@@ -303,19 +263,26 @@ torchaudio.save(
     16000,
     channels_first=True,
 )
+update_progress(args.job_id, "diarization", 20)
 
-# Initialize NeMo MSDD diarization model with updated config path
+# Initialize NeMo model
 msdd_model = NeuralDiarizer(cfg=create_config(nemo_temp_path)).to(args.device)
+update_progress(args.job_id, "diarization", 40)
+
+# Run diarization
 msdd_model.eval()
+update_progress(args.job_id, "diarization", 60)
 msdd_model.diarize()
+update_progress(args.job_id, "diarization", 80)
 
 del msdd_model
 torch.cuda.empty_cache()
 
-# Update RTTM file path to use NeMo temp directory
+# Process RTTM file
 rttm_path = os.path.join(nemo_temp_path, "pred_rttms", "mono_file.rttm")
+update_progress(args.job_id, "diarization", 90)
 
-# Reading timestamps <> Speaker Labels mapping
+# Process speaker timestamps
 speaker_ts = []
 speaker_id_map = {}
 next_id = 1
@@ -335,7 +302,10 @@ with open(rttm_path, "r") as f:
         new_id = speaker_id_map[original_id]
         speaker_ts.append([s, e, new_id])
 
-# Modified get_words_speaker_mapping function call
+update_progress(args.job_id, "diarization", 100)
+
+# Finalizing stage
+update_progress(args.job_id, "finalizing", 0)
 wsm = get_words_speaker_mapping(word_timestamps, speaker_ts, "start")
 
 if language in punct_model_langs:
@@ -348,8 +318,6 @@ if language in punct_model_langs:
 
     ending_puncts = ".?!"
     model_puncts = ".,;:!?"
-
-    # We don't want to punctuate U.S.A. with a period. Right?
     is_acronym = lambda x: re.fullmatch(r"\b(?:[a-zA-Z]\.){2,}", x)
 
     for word_dict, labeled_tuple in zip(wsm, labeled_words):
@@ -369,7 +337,9 @@ else:
         f"Punctuation restoration is not available for {language} language. Using the original punctuation."
     )
 
-# Punctuation restoration and realignment
+update_progress(args.job_id, "finalizing", 50)
+
+# Final processing
 wsm = get_realigned_ws_mapping_with_punctuation(wsm)
 ssm = get_sentences_speaker_mapping(wsm, speaker_ts)
 
@@ -387,7 +357,7 @@ srt_txt = srt_io.getvalue()
 
 # Apply the cleanup functions
 formatted_transcript_txt = format_transcript(transcript_txt)
-formatted_srt_txt = format_transcript(srt_txt)  # You'll need to implement this function
+formatted_srt_txt = format_transcript(srt_txt)
 
 # Write transcript output to the specified directory
 transcript_output_path = os.path.join(
@@ -402,6 +372,8 @@ srt_output_path = os.path.join(
 )
 with open(srt_output_path, "w", encoding="utf-8-sig") as f:
     f.write(formatted_srt_txt)
+
+update_progress(args.job_id, "finalizing", 100)
 
 # Clean up temporary files
 cleanup(temp_outputs)
