@@ -7,3 +7,4 @@ __pycache__/
 
 .conda
 audios/
+temp_processing/
