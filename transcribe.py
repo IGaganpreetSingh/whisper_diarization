@@ -176,7 +176,7 @@ if args.job_id:
 if args.stemming:
     try:
         if args.job_id:
-            update_progress(args.job_id, "source_separation_model_loading", 50)
+            update_progress(args.job_id, "source_separation_loading", 50)
 
         return_code = os.system(
             f'python -m demucs.separate -n htdemucs --two-stems=vocals "{args.audio}" -o "{temp_outputs}"'
@@ -189,7 +189,7 @@ if args.stemming:
             vocal_target = args.audio
         else:
             if args.job_id:
-                update_progress(args.job_id, "source_separation_in_progress", 50)
+                update_progress(args.job_id, "source_separation_processing", 50)
 
             vocals_path = os.path.join(
                 temp_outputs,
