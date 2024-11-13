@@ -175,7 +175,7 @@ if args.stemming:
     return_code = os.system(
         f'python -m demucs.separate -n htdemucs --two-stems=vocals "{args.audio}" -o "{temp_outputs}"'
     )
-    update_progress(args.job_id, "source_separation", 50)
+    update_progress(args.job_id, "source_separation", 10)
 
     if return_code != 0:
         logging.warning(
@@ -189,6 +189,7 @@ if args.stemming:
             os.path.splitext(os.path.basename(args.audio))[0],
             "vocals.wav",
         )
+        update_progress(args.job_id, "source_separation", 70)
         # Add vocal enhancement step
         enhanced_vocals_path = os.path.join(
             temp_outputs,
@@ -199,10 +200,12 @@ if args.stemming:
         vocal_target = enhance_vocals(
             vocals_path, enhanced_vocals_path, volume_boost_db=6.0
         )
+        update_progress(args.job_id, "source_separation", 100)
 else:
     vocal_target = args.audio
 
 # Transcribe the audio file
+update_progress(args.job_id, "transcription", 0)
 whisper_results, language, audio_waveform = transcribe_batched(
     vocal_target,
     language,
