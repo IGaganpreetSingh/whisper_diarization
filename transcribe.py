@@ -165,15 +165,12 @@ os.makedirs(nemo_temp_path, exist_ok=True)
 
 language = process_language_arg(args.language, args.model_name)
 update_progress(args.job_id, "initializing")
-
-# Source separation stage
-if args.job_id:
-    update_progress(args.job_id, "source_separation_started")
+print("Initializing")
 
 if args.stemming:
     try:
-        update_progress(args.job_id, "source_separation_loading")
-
+        update_progress(args.job_id, "source_separation_processing")
+        print("Source separation processing")
         return_code = os.system(
             f'python -m demucs.separate -n htdemucs --two-stems=vocals "{args.audio}" -o "{temp_outputs}"'
         )
@@ -184,8 +181,6 @@ if args.stemming:
             )
             vocal_target = args.audio
         else:
-            update_progress(args.job_id, "source_separation_processing")
-
             vocals_path = os.path.join(
                 temp_outputs,
                 "htdemucs",
@@ -194,7 +189,7 @@ if args.stemming:
             )
 
             update_progress(args.job_id, "source_separation_enhancing")
-
+            print("Source separation enhancing")
             # Add vocal enhancement step
             enhanced_vocals_path = os.path.join(
                 temp_outputs,
@@ -207,6 +202,7 @@ if args.stemming:
             )
 
             update_progress(args.job_id, "source_separation_completed")
+            print("Source separation completed")
     except Exception as e:
         logging.error(f"Error in source separation: {str(e)}")
         vocal_target = args.audio
@@ -215,6 +211,7 @@ else:
 
 # Transcription stage
 update_progress(args.job_id, "transcription_started")
+print("Transcription started")
 whisper_results, language, audio_waveform = transcribe_batched(
     vocal_target,
     language,
@@ -225,9 +222,11 @@ whisper_results, language, audio_waveform = transcribe_batched(
     args.device,
 )
 update_progress(args.job_id, "transcription_completed")
-
+print("Transcription completed")
 # Alignment stage
 update_progress(args.job_id, "alignment_started")
+print("Alignment started")
+
 alignment_model, alignment_tokenizer = load_alignment_model(
     args.device,
     dtype=torch.float16 if args.device == "cuda" else torch.float32,
@@ -263,9 +262,10 @@ spans = get_spans(tokens_starred, segments, blank_token)
 
 word_timestamps = postprocess_results(text_starred, spans, stride, scores)
 update_progress(args.job_id, "alignment_completed")
-
+print("Alignment completed")
 # Diarization stage
 update_progress(args.job_id, "diarization_started")
+print("Diarization started")
 
 # Save mono audio
 mono_path = os.path.join(nemo_temp_path, "mono_file.wav")
@@ -277,11 +277,12 @@ torchaudio.save(
 )
 
 update_progress(args.job_id, "diarization_model_loading")
-
+print("Diarization model loading")
 # Initialize NeMo model
 msdd_model = NeuralDiarizer(cfg=create_config(nemo_temp_path)).to(args.device)
 
 update_progress(args.job_id, "diarization_processing")
+print("Diarization processing")
 
 # Run diarization
 msdd_model.eval()
@@ -314,13 +315,17 @@ with open(rttm_path, "r") as f:
         speaker_ts.append([s, e, new_id])
 
 update_progress(args.job_id, "diarization_completed")
+print("Diarization completed")
 
 # Finalizing stage
 update_progress(args.job_id, "finalizing_started")
+print("Finalizing started")
+
 wsm = get_words_speaker_mapping(word_timestamps, speaker_ts, "start")
 
 if language in punct_model_langs:
     update_progress(args.job_id, "punctuation_restoration")
+    print("Punctuation restoration")
     # restoring punctuation in the transcript to help realign the sentences
     punct_model = PunctuationModel(model="kredor/punctuate-all")
 
@@ -350,7 +355,7 @@ else:
     )
 
 update_progress(args.job_id, "generating_transcript")
-
+print("Generating transcript")
 # Final processing
 wsm = get_realigned_ws_mapping_with_punctuation(wsm)
 ssm = get_sentences_speaker_mapping(wsm, speaker_ts)
@@ -372,7 +377,7 @@ formatted_transcript_txt = format_transcript(transcript_txt)
 formatted_srt_txt = format_transcript(srt_txt)
 
 update_progress(args.job_id, "saving_files")
-
+print("Saving files")
 # Write transcript output to the specified directory
 transcript_output_path = os.path.join(
     args.temp_dir, f"{os.path.splitext(os.path.basename(args.audio))[0]}.txt"
@@ -388,6 +393,6 @@ with open(srt_output_path, "w", encoding="utf-8-sig") as f:
     f.write(formatted_srt_txt)
 
 update_progress(args.job_id, "completed")
-
+print("Completed")
 # Clean up temporary files
 cleanup(temp_outputs)
