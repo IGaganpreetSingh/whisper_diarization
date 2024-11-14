@@ -19,19 +19,23 @@ class TranscriptionProgress:
         self.job_id = job_id
         self.temp_dir = temp_dir
         self.progress_file = temp_dir / f"{job_id}_progress.json"
-        self.update_stage("initializing")
+        self.create_progress_file()
 
-    def update_stage(self, stage: str):
-        """Update the current processing stage"""
+    def create_progress_file(self):
+        """Create initial progress file"""
+        with open(self.progress_file, "w") as f:
+            json.dump(
+                {"status": "processing", "stage": "initializing", "progress": 0}, f
+            )
+
+    def get_status(self):
         try:
-            with open(self.progress_file, "w") as f:
-                json.dump({"status": "processing", "stage": stage}, f)
+            if self.progress_file.exists():
+                with open(self.progress_file) as f:
+                    return json.load(f)
         except Exception:
             pass
-
-    def mark_complete(self, output_file: str):
-        with open(self.progress_file, "w") as f:
-            json.dump({"status": "completed", "output_file": output_file}, f)
+        return {"status": "processing", "stage": "initializing", "progress": 0}
 
 
 # Create a base directory for all temporary files
@@ -185,6 +189,7 @@ async def get_status(job_id: str):
                         {
                             "status": "processing",
                             "stage": progress_data.get("stage", "initializing"),
+                            "progress": progress_data.get("progress", 0),
                         }
                     )
         except Exception:

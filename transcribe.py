@@ -43,10 +43,40 @@ def update_progress(job_id, stage):
     if not job_id:
         return
 
+    # Define stage percentages
+    STAGES = {
+        "initializing": 0,
+        "source_separation_started": 10,
+        "source_separation_loading": 15,
+        "source_separation_processing": 20,
+        "source_separation_enhancing": 25,
+        "source_separation_completed": 30,
+        "transcription_started": 35,
+        "transcription_completed": 50,
+        "alignment_started": 55,
+        "alignment_completed": 70,
+        "diarization_started": 75,
+        "diarization_model_loading": 80,
+        "diarization_processing": 85,
+        "diarization_completed": 90,
+        "finalizing_started": 92,
+        "punctuation_restoration": 95,
+        "generating_transcript": 97,
+        "saving_files": 98,
+        "completed": 100,
+    }
+
     progress_file = os.path.join(args.temp_dir, f"{job_id}_progress.json")
     try:
         with open(progress_file, "w") as f:
-            json.dump({"stage": stage}, f)
+            json.dump(
+                {
+                    "status": "processing",
+                    "stage": stage,
+                    "progress": STAGES.get(stage, 0),
+                },
+                f,
+            )
     except Exception as e:
         logging.warning(f"Failed to update progress: {str(e)}")
 
@@ -169,8 +199,8 @@ print("Initializing")
 
 if args.stemming:
     try:
-        update_progress(args.job_id, "source_separation_processing")
-        print("Source separation processing")
+        update_progress(args.job_id, "source_separation_loading")
+        print("Source separation loading")
         return_code = os.system(
             f'python -m demucs.separate -n htdemucs --two-stems=vocals "{args.audio}" -o "{temp_outputs}"'
         )
@@ -181,6 +211,8 @@ if args.stemming:
             )
             vocal_target = args.audio
         else:
+            update_progress(args.job_id, "source_separation_processing")
+            print("Source separation processing")
             vocals_path = os.path.join(
                 temp_outputs,
                 "htdemucs",
