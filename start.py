@@ -19,40 +19,13 @@ job_statuses = {}
 class TranscriptionProgress:
     def __init__(self):
         self.current_stage = "initializing"
-        self.progress = 0
-        self.stages = {
-            "initializing": (0, 2),
-            "source_separation_start": (5, 8),
-            "source_separation_loading": (8, 12),
-            "source_separation_processing": (12, 16),
-            "source_separation_enhancing": (16, 20),
-            "transcription": (20, 50),
-            "alignment": (50, 70),
-            "diarization": (70, 90),
-            "finalizing": (90, 100),
-        }
 
-    def update_stage(self, stage: str, sub_progress: float = 0):
-        """
-        Update the current stage and calculate overall progress
-
-        :param stage: Current processing stage
-        :param sub_progress: Progress within the current stage (0-100)
-        """
-        if stage not in self.stages:
-            return
-
+    def update_stage(self, stage: str):
+        """Update the current processing stage"""
         self.current_stage = stage
-        stage_start, stage_end = self.stages[stage]
-        stage_range = stage_end - stage_start
-        self.progress = stage_start + (stage_range * (sub_progress / 100))
 
     def get_status(self):
-        return {
-            "status": "processing",
-            "stage": self.current_stage,
-            "progress": round(self.progress, 2),
-        }
+        return {"status": "processing", "stage": self.current_stage}
 
     def get(self, key, default=None):
         if key == "canceled":
@@ -61,8 +34,6 @@ class TranscriptionProgress:
             return "processing"
         if key == "stage":
             return self.current_stage
-        if key == "progress":
-            return round(self.progress, 2)
         return default
 
 
@@ -125,7 +96,6 @@ def process_audio(
         if not stem:
             command.append("--no-stem")
 
-        # Start the process with pipe for output
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
@@ -134,21 +104,16 @@ def process_audio(
             bufsize=1,
         )
 
-        # Handle output and progress in real-time
         while True:
-            # Read output
             output = process.stdout.readline()
             error = process.stderr.readline()
 
-            # Print output in real-time
             if output:
                 print(output.strip())
             if error:
                 print(error.strip(), file=sys.stderr)
 
-            # Check if process has finished
             if process.poll() is not None:
-                # Read any remaining output
                 for output in process.stdout.readlines():
                     if output:
                         print(output.strip())
@@ -157,30 +122,25 @@ def process_audio(
                         print(error.strip(), file=sys.stderr)
                 break
 
-            # Check for progress updates
             progress_file = os.path.join(job_dir, f"{job_id}_progress.json")
             if os.path.exists(progress_file):
                 try:
                     with open(progress_file, "r") as f:
                         progress_data = json.load(f)
-                        progress_tracker.update_stage(
-                            progress_data["stage"], progress_data["sub_progress"]
-                        )
+                        progress_tracker.update_stage(progress_data["stage"])
                 except Exception as e:
                     print(f"Failed to read progress: {str(e)}")
 
-            # Check for cancellation
             if isinstance(job_statuses[job_id], dict) and job_statuses[job_id].get(
                 "canceled"
             ):
                 process.terminate()
-                job_statuses[job_id] = {"status": "canceled", "progress": 0}
+                job_statuses[job_id] = {"status": "canceled"}
                 cleanup(str(job_dir))
                 return
 
-            time.sleep(0.1)  # Small delay to prevent CPU overuse
+            time.sleep(0.1)
 
-        # Check process output
         if process.returncode != 0:
             raise subprocess.CalledProcessError(process.returncode, command)
 
@@ -196,7 +156,6 @@ def process_audio(
             job_statuses[job_id] = {
                 "status": "completed",
                 "output_file": str(final_output),
-                "progress": 100,
             }
         else:
             if not (
@@ -206,7 +165,7 @@ def process_audio(
                 raise FileNotFoundError("Transcription output file not found")
 
     except Exception as e:
-        job_statuses[job_id] = {"status": "failed", "error": str(e), "progress": 0}
+        job_statuses[job_id] = {"status": "failed", "error": str(e)}
         print(f"Error in process_audio: {str(e)}", file=sys.stderr)
     finally:
         if os.path.exists(audio_path):

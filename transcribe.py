@@ -38,7 +38,7 @@ import random
 import numpy as np
 
 
-def update_progress(job_id, stage, sub_progress=0):
+def update_progress(job_id, stage):
     """Update progress through file system"""
     if not job_id:
         return
@@ -46,7 +46,7 @@ def update_progress(job_id, stage, sub_progress=0):
     progress_file = os.path.join(args.temp_dir, f"{job_id}_progress.json")
     try:
         with open(progress_file, "w") as f:
-            json.dump({"stage": stage, "sub_progress": sub_progress}, f)
+            json.dump({"stage": stage}, f)
     except Exception as e:
         logging.warning(f"Failed to update progress: {str(e)}")
 
@@ -163,20 +163,16 @@ os.makedirs(temp_outputs, exist_ok=True)
 nemo_temp_path = os.path.join(temp_outputs, "nemo")
 os.makedirs(nemo_temp_path, exist_ok=True)
 
-# Start progress tracking
-update_progress(args.job_id, "initializing", 0)
-
 language = process_language_arg(args.language, args.model_name)
-update_progress(args.job_id, "initializing", 100)
+update_progress(args.job_id, "initializing")
 
 # Source separation stage
 if args.job_id:
-    update_progress(args.job_id, "source_separation_start", 0)
+    update_progress(args.job_id, "source_separation_started")
 
 if args.stemming:
     try:
-        if args.job_id:
-            update_progress(args.job_id, "source_separation_loading", 50)
+        update_progress(args.job_id, "source_separation_loading")
 
         return_code = os.system(
             f'python -m demucs.separate -n htdemucs --two-stems=vocals "{args.audio}" -o "{temp_outputs}"'
@@ -188,8 +184,7 @@ if args.stemming:
             )
             vocal_target = args.audio
         else:
-            if args.job_id:
-                update_progress(args.job_id, "source_separation_processing", 50)
+            update_progress(args.job_id, "source_separation_processing")
 
             vocals_path = os.path.join(
                 temp_outputs,
@@ -198,8 +193,7 @@ if args.stemming:
                 "vocals.wav",
             )
 
-            if args.job_id:
-                update_progress(args.job_id, "source_separation_enhancing", 0)
+            update_progress(args.job_id, "source_separation_enhancing")
 
             # Add vocal enhancement step
             enhanced_vocals_path = os.path.join(
@@ -212,16 +206,15 @@ if args.stemming:
                 vocals_path, enhanced_vocals_path, volume_boost_db=6.0
             )
 
-            if args.job_id:
-                update_progress(args.job_id, "source_separation_enhancing", 100)
+            update_progress(args.job_id, "source_separation_completed")
     except Exception as e:
         logging.error(f"Error in source separation: {str(e)}")
         vocal_target = args.audio
 else:
     vocal_target = args.audio
 
-# Transcribe the audio file
-update_progress(args.job_id, "transcription", 0)
+# Transcription stage
+update_progress(args.job_id, "transcription_started")
 whisper_results, language, audio_waveform = transcribe_batched(
     vocal_target,
     language,
@@ -231,10 +224,10 @@ whisper_results, language, audio_waveform = transcribe_batched(
     args.suppress_numerals,
     args.device,
 )
-update_progress(args.job_id, "transcription", 100)
+update_progress(args.job_id, "transcription_completed")
 
 # Alignment stage
-update_progress(args.job_id, "alignment", 0)
+update_progress(args.job_id, "alignment_started")
 alignment_model, alignment_tokenizer = load_alignment_model(
     args.device,
     dtype=torch.float16 if args.device == "cuda" else torch.float32,
@@ -269,10 +262,10 @@ segments, scores, blank_token = get_alignments(
 spans = get_spans(tokens_starred, segments, blank_token)
 
 word_timestamps = postprocess_results(text_starred, spans, stride, scores)
-update_progress(args.job_id, "alignment", 100)
+update_progress(args.job_id, "alignment_completed")
 
-# Before diarization
-update_progress(args.job_id, "diarization", 0)
+# Diarization stage
+update_progress(args.job_id, "diarization_started")
 
 # Save mono audio
 mono_path = os.path.join(nemo_temp_path, "mono_file.wav")
@@ -282,24 +275,23 @@ torchaudio.save(
     16000,
     channels_first=True,
 )
-update_progress(args.job_id, "diarization", 20)
+
+update_progress(args.job_id, "diarization_model_loading")
 
 # Initialize NeMo model
 msdd_model = NeuralDiarizer(cfg=create_config(nemo_temp_path)).to(args.device)
-update_progress(args.job_id, "diarization", 40)
+
+update_progress(args.job_id, "diarization_processing")
 
 # Run diarization
 msdd_model.eval()
-update_progress(args.job_id, "diarization", 60)
 msdd_model.diarize()
-update_progress(args.job_id, "diarization", 80)
 
 del msdd_model
 torch.cuda.empty_cache()
 
 # Process RTTM file
 rttm_path = os.path.join(nemo_temp_path, "pred_rttms", "mono_file.rttm")
-update_progress(args.job_id, "diarization", 90)
 
 # Process speaker timestamps
 speaker_ts = []
@@ -321,13 +313,14 @@ with open(rttm_path, "r") as f:
         new_id = speaker_id_map[original_id]
         speaker_ts.append([s, e, new_id])
 
-update_progress(args.job_id, "diarization", 100)
+update_progress(args.job_id, "diarization_completed")
 
 # Finalizing stage
-update_progress(args.job_id, "finalizing", 0)
+update_progress(args.job_id, "finalizing_started")
 wsm = get_words_speaker_mapping(word_timestamps, speaker_ts, "start")
 
 if language in punct_model_langs:
+    update_progress(args.job_id, "punctuation_restoration")
     # restoring punctuation in the transcript to help realign the sentences
     punct_model = PunctuationModel(model="kredor/punctuate-all")
 
@@ -356,7 +349,7 @@ else:
         f"Punctuation restoration is not available for {language} language. Using the original punctuation."
     )
 
-update_progress(args.job_id, "finalizing", 50)
+update_progress(args.job_id, "generating_transcript")
 
 # Final processing
 wsm = get_realigned_ws_mapping_with_punctuation(wsm)
@@ -378,6 +371,8 @@ srt_txt = srt_io.getvalue()
 formatted_transcript_txt = format_transcript(transcript_txt)
 formatted_srt_txt = format_transcript(srt_txt)
 
+update_progress(args.job_id, "saving_files")
+
 # Write transcript output to the specified directory
 transcript_output_path = os.path.join(
     args.temp_dir, f"{os.path.splitext(os.path.basename(args.audio))[0]}.txt"
@@ -392,7 +387,7 @@ srt_output_path = os.path.join(
 with open(srt_output_path, "w", encoding="utf-8-sig") as f:
     f.write(formatted_srt_txt)
 
-update_progress(args.job_id, "finalizing", 100)
+update_progress(args.job_id, "completed")
 
 # Clean up temporary files
 cleanup(temp_outputs)
