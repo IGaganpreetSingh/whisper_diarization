@@ -23,11 +23,18 @@ class TranscriptionProgress:
         self.create_progress_file()
 
     def create_progress_file(self):
-        """Create initial progress file"""
         with open(self.progress_file, "w") as f:
             json.dump(
                 {"status": "processing", "stage": "initializing", "progress": 0}, f
             )
+
+    def mark_complete(self, output_file: str):
+        with open(self.progress_file, "w") as f:
+            json.dump(
+                {"status": "completed", "output_file": output_file, "progress": 100}, f
+            )
+        # Update the job_statuses dictionary
+        job_statuses[self.job_id] = {"status": "completed", "output_file": output_file}
 
     def get_status(self):
         try:
@@ -239,23 +246,36 @@ async def get_result(job_id: str, background_tasks: BackgroundTasks):
         return JSONResponse({"status": "not_found"}, status_code=404)
 
     job_status = job_statuses[job_id]
+
+    # Check if it's still a TranscriptionProgress object
     if isinstance(job_status, TranscriptionProgress):
-        return JSONResponse({"status": "processing"}, status_code=400)
+        # Read the progress file to get the actual status
+        status = job_status.get_status()
+        if status.get("status") != "completed":
+            return JSONResponse({"status": "processing"}, status_code=400)
+        # If completed, use the status from the progress file
+        job_status = status
 
-    if job_status["status"] != "completed":
-        return JSONResponse({"status": job_status["status"]}, status_code=400)
+    # Handle dictionary status
+    if isinstance(job_status, dict):
+        if job_status.get("status") != "completed":
+            return JSONResponse(
+                {"status": job_status.get("status", "unknown")}, status_code=400
+            )
 
-    output_file = job_status["output_file"]
-    if not os.path.exists(output_file):
-        return JSONResponse({"status": "file_not_found"}, status_code=404)
+        output_file = job_status.get("output_file")
+        if not output_file or not os.path.exists(output_file):
+            return JSONResponse({"status": "file_not_found"}, status_code=404)
 
-    # Add cleanup task properly
-    background_tasks.add_task(cleanup_job_files, job_id)
+        # Add cleanup task
+        background_tasks.add_task(cleanup_job_files, job_id)
 
-    # Return the file
-    return FileResponse(
-        output_file, media_type="text/plain", filename="transcription.txt"
-    )
+        # Return the file
+        return FileResponse(
+            output_file, media_type="text/plain", filename="transcription.txt"
+        )
+
+    return JSONResponse({"status": "invalid_state"}, status_code=500)
 
 
 @app.post("/cancel/{job_id}")
