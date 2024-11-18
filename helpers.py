@@ -403,7 +403,7 @@ def format_transcript(text):
         # line = re.sub(r"(\w+) at (\w+)\s*\.\s*(\w+)", r"\1@\2.\3", line)
         line = re.sub(r"(\d+)\s*-\s*(\d+)\s*-\s*(\d+)", r"\1-\2-\3", line)
         # Use re.sub to remove all occurrences of "..."
-        line = re.sub(r"\.\.\.", "", line)
+        line = re.sub(r"\.\.\.", "[indistinct]", line)
         line = re.sub(r'(\d{1,3}(,\d{3})*(\.\d+)?)[ ]+(?<!\w)rand\b(?!\w)', r'R\1', line, flags=re.IGNORECASE)
         line = re.sub(r"\b(my|My)\s+lord\b", r"M'Lord", line, flags=re.IGNORECASE)
         line = re.sub(r"\b(my|My)\s+lady\b", r"M'Lady", line, flags=re.IGNORECASE)
