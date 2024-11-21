@@ -392,6 +392,11 @@ def format_transcript(text):
     cleaned_lines = []
 
     for line in lines:
+        # Skip empty lines
+        if not line.strip():
+            cleaned_lines.append(line)
+            continue
+
         # Replace multiple spaces with a single space
         line = re.sub(r"\s+", " ", line)
         # Ensure only one space after periods and question marks, except for ellipsis
@@ -404,14 +409,33 @@ def format_transcript(text):
         line = re.sub(r"(\d+)\s*-\s*(\d+)\s*-\s*(\d+)", r"\1-\2-\3", line)
         # Use re.sub to remove all occurrences of "..."
         line = re.sub(r"\.\.\.", "[indistinct]", line)
-        line = re.sub(r'(\d{1,3}(,\d{3})*(\.\d+)?)[ ]+(?<!\w)rand\b(?!\w)', r'R\1', line, flags=re.IGNORECASE)
+        line = re.sub(
+            r"(\d{1,3}(,\d{3})*(\.\d+)?)[ ]+(?<!\w)rand\b(?!\w)",
+            r"R\1",
+            line,
+            flags=re.IGNORECASE,
+        )
         line = re.sub(r"\b(my|My)\s+lord\b", r"M'Lord", line, flags=re.IGNORECASE)
         line = re.sub(r"\b(my|My)\s+lady\b", r"M'Lady", line, flags=re.IGNORECASE)
-        # Capitalize the first letter of the sentence after a speaker label
+
+        # Handle speaker labels and capitalize first word after them
+        if line.startswith("Speaker"):
+            line = re.sub(
+                r"(^Speaker \d+:)\s*(\w)",
+                lambda x: x.group(1) + " " + x.group(2).upper(),
+                line,
+            )
+        # For lines without speaker labels, capitalize the first letter if it's not already capitalized
+        else:
+            line = re.sub(
+                r"^(\s*)(\w)",
+                lambda x: x.group(1) + x.group(2).upper(),
+                line,
+            )
+
+        # Capitalize first letter after end of sentence punctuation within the line
         line = re.sub(
-            r"(^Speaker \d+:)\s*(\w)",
-            lambda x: x.group(1) + " " + x.group(2).upper(),
-            line,
+            r"([.!?]\s+)(\w)", lambda x: x.group(1) + x.group(2).upper(), line
         )
 
         cleaned_lines.append(line)
