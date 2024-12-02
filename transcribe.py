@@ -1,5 +1,4 @@
 import argparse
-import logging
 import os
 import re
 import io
@@ -16,9 +15,11 @@ from ctc_forced_aligner import (
     postprocess_results,
     preprocess_text,
 )
+from audio_quality import analyze_media_quality
 from deepmultilingualpunctuation import PunctuationModel
 from nemo.collections.asr.models.msdd_models import NeuralDiarizer
-
+import warnings
+from transformers import logging
 from helpers import (
     cleanup,
     create_config,
@@ -34,9 +35,12 @@ from helpers import (
     write_srt,
 )
 from transcription_helpers import transcribe_batched
-import random
 import numpy as np
 
+logging.set_verbosity_error()
+warnings.filterwarnings(
+    "ignore", message="You seem to be using the pipelines sequentially on GPU.*"
+)
 
 def update_progress(job_id, stage):
     """Update progress through file system"""
@@ -49,7 +53,6 @@ def update_progress(job_id, stage):
         "source_separation_started": 10,
         "source_separation_loading": 15,
         "source_separation_processing": 20,
-        "source_separation_enhancing": 25,
         "source_separation_completed": 30,
         "transcription_started": 35,
         "transcription_completed": 50,
@@ -79,23 +82,6 @@ def update_progress(job_id, stage):
             )
     except Exception as e:
         logging.warning(f"Failed to update progress: {str(e)}")
-
-
-def set_seed(seed=42):
-    """
-    Set seeds for reproducibility with a balance of practicality.
-    """
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    if hasattr(torch, "use_deterministic_algorithms"):
-        torch.use_deterministic_algorithms(False)
-
-
-set_seed()
 
 
 def enhance_vocals(audio_path, output_path, volume_boost_db=6.0):
@@ -199,6 +185,13 @@ print("Initializing")
 
 if args.stemming:
     try:
+        quality_metrics = analyze_media_quality(args.audio)
+        print("\nAudio Quality Analysis:")
+        for metric, value in quality_metrics.items():
+            if isinstance(value, float):
+                print(f"{metric}: {value:.2f}")
+            else:
+                print(f"{metric}: {value}")
         update_progress(args.job_id, "source_separation_loading")
         print("Source separation loading")
         return_code = os.system(
@@ -213,26 +206,19 @@ if args.stemming:
         else:
             update_progress(args.job_id, "source_separation_processing")
             print("Source separation processing")
-            vocals_path = os.path.join(
+            vocal_target = os.path.join(
                 temp_outputs,
                 "htdemucs",
                 os.path.splitext(os.path.basename(args.audio))[0],
                 "vocals.wav",
             )
-
-            update_progress(args.job_id, "source_separation_enhancing")
-            print("Source separation enhancing")
-            # Add vocal enhancement step
-            enhanced_vocals_path = os.path.join(
-                temp_outputs,
-                "htdemucs",
-                os.path.splitext(os.path.basename(args.audio))[0],
-                "vocals_enhanced.wav",
-            )
-            vocal_target = enhance_vocals(
-                vocals_path, enhanced_vocals_path, volume_boost_db=6.0
-            )
-
+            quality_metrics = analyze_media_quality(vocal_target)
+            print("\nAudio Quality Analysis:")
+            for metric, value in quality_metrics.items():
+                if isinstance(value, float):
+                    print(f"{metric}: {value:.2f}")
+                else:
+                    print(f"{metric}: {value}")
             update_progress(args.job_id, "source_separation_completed")
             print("Source separation completed")
     except Exception as e:
@@ -355,31 +341,40 @@ print("Finalizing started")
 
 wsm = get_words_speaker_mapping(word_timestamps, speaker_ts, "start")
 
+# Modified punctuation restoration section
 if language in punct_model_langs:
     update_progress(args.job_id, "punctuation_restoration")
     print("Punctuation restoration")
-    # restoring punctuation in the transcript to help realign the sentences
-    punct_model = PunctuationModel(model="kredor/punctuate-all")
 
-    words_list = list(map(lambda x: x["word"], wsm))
+    try:
+        punct_model = PunctuationModel(model="kredor/punctuate-all")
 
-    labeled_words = punct_model.predict(words_list, chunk_size=230)
+        # Process words in chunks to be more memory efficient
+        words_list = list(map(lambda x: x["word"], wsm))
 
-    ending_puncts = ".?!"
-    model_puncts = ".,;:!?"
-    is_acronym = lambda x: re.fullmatch(r"\b(?:[a-zA-Z]\.){2,}", x)
+        labeled_words = punct_model.predict(words_list, chunk_size=230)
 
-    for word_dict, labeled_tuple in zip(wsm, labeled_words):
-        word = word_dict["word"]
-        if (
-            word
-            and labeled_tuple[1] in ending_puncts
-            and (word[-1] not in model_puncts or is_acronym(word))
-        ):
-            word += labeled_tuple[1]
-            if word.endswith(".."):
-                word = word.rstrip(".")
-            word_dict["word"] = word
+        ending_puncts = ".?!"
+        model_puncts = ".,;:!?"
+        is_acronym = lambda x: re.fullmatch(r"\b(?:[a-zA-Z]\.){2,}", x)
+
+        for word_dict, labeled_tuple in zip(wsm, labeled_words):
+            word = word_dict["word"]
+            if (
+                word
+                and labeled_tuple[1] in ending_puncts
+                and (word[-1] not in model_puncts or is_acronym(word))
+            ):
+                word += labeled_tuple[1]
+                if word.endswith(".."):
+                    word = word.rstrip(".")
+                word_dict["word"] = word
+
+    except Exception as e:
+        logging.error(f"Error in punctuation restoration: {str(e)}")
+        logging.warning(
+            "Continuing with original punctuation due to error in restoration"
+        )
 
 else:
     logging.warning(
