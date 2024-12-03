@@ -5,10 +5,14 @@ from fastapi.responses import FileResponse, JSONResponse
 import subprocess
 import torch
 import uuid
+import tempfile
+from typing import Dict
 from pathlib import Path
 from helpers import cleanup
 import time
 import psutil
+from audio_quality import analyze_media_quality
+
 app = FastAPI()
 
 # Dictionary to store job statuses
@@ -287,6 +291,24 @@ async def cancel_transcription(job_id: str):
 
     return JSONResponse({"status": "canceled"})
 
+
+@app.post("/calculate-snr")
+async def calculate_snr(audio: UploadFile = File(...)) -> Dict[str, float]:
+    """
+    Calculate SNR from uploaded audio file using existing analyzer
+    """
+    with tempfile.NamedTemporaryFile(
+        delete=False, suffix=os.path.splitext(audio.filename)[1]
+    ) as temp_file:
+        content = await audio.read()
+        temp_file.write(content)
+        temp_path = temp_file.name
+
+    try:
+        # Use your existing analyze_media_quality function
+        return analyze_media_quality(temp_path)
+    finally:
+        os.unlink(temp_path)
 
 if __name__ == "__main__":
     import uvicorn

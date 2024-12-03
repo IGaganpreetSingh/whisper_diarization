@@ -141,42 +141,8 @@ class UniversalAudioAnalyzer:
             else float("inf")
         )
 
-        # Additional metrics
-        peak_level = np.max(np.abs(audio_norm))
-        crest_factor = (
-            20 * np.log10(peak_level / speech_level) if speech_level > 0 else 0
-        )
-
-        # Spectral analysis
-        spec = np.abs(librosa.stft(audio_norm))
-        spectral_centroid = librosa.feature.spectral_centroid(
-            S=spec, sr=sample_rate
-        ).mean()
-        spectral_bandwidth = librosa.feature.spectral_bandwidth(
-            S=spec, sr=sample_rate
-        ).mean()
-
-        # Clipping detection
-        clipping_threshold = 0.99
-        samples_clipped = np.sum(np.abs(audio_norm) > clipping_threshold)
-        clipping_percentage = (samples_clipped / len(audio_norm)) * 100
-
-        return {
-            "noise_floor_db": (
-                20 * np.log10(noise_level) if noise_level > 0 else float("-inf")
-            ),
-            "signal_level_db": (
-                20 * np.log10(speech_level) if speech_level > 0 else float("-inf")
-            ),
-            "peak_level_db": 20 * np.log10(peak_level),
-            "snr_db": snr,
-            "crest_factor_db": crest_factor,
-            "spectral_centroid_hz": float(spectral_centroid),
-            "spectral_bandwidth_hz": float(spectral_bandwidth),
-            "clipping_percentage": clipping_percentage,
-            "duration_seconds": len(audio_data) / sample_rate,
-            "sample_rate": sample_rate,
-        }
+        # Return only SNR
+        return {"snr_db": snr}
 
 
 def analyze_media_quality(file_path: str) -> Dict[str, float]:
