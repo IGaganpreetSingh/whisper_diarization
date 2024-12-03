@@ -2,6 +2,7 @@ import argparse
 import os
 import re
 import io
+import faster_whisper
 import torch
 import torchaudio
 import librosa
@@ -34,7 +35,6 @@ from helpers import (
     format_transcript,
     write_srt,
 )
-from transcription_helpers import transcribe_batched
 import numpy as np
 
 logging.set_verbosity_error()
@@ -126,15 +126,6 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "--suppress_numerals",
-    action="store_true",
-    dest="suppress_numerals",
-    default=False,
-    help="Suppresses Numerical Digits."
-    "This helps the diarization accuracy but converts all digits into written text.",
-)
-
-parser.add_argument(
     "--whisper-model",
     dest="model_name",
     default="large-v3",
@@ -146,7 +137,8 @@ parser.add_argument(
     type=int,
     dest="batch_size",
     default=8,
-    help="Batch size for batched inference, reduce if you run out of memory, set to 0 for non-batched inference",
+    help="Batch size for batched inference, reduce if you run out of memory, "
+    "set to 0 for original whisper longform inference",
 )
 
 parser.add_argument(
@@ -200,27 +192,52 @@ if args.stemming:
 
         if return_code != 0:
             logging.warning(
-                "Source splitting failed, using original audio file. Use --no-stem argument to disable it."
+                "Source splitting failed, using original audio file. "
+                "Use --no-stem argument to disable it."
             )
             vocal_target = args.audio
         else:
             update_progress(args.job_id, "source_separation_processing")
             print("Source separation processing")
-            vocal_target = os.path.join(
+            if quality_metrics.get("snr_db", 0.0) >= 20.0: # If SNR is above threshold, use the original vocals
+                vocal_target = os.path.join(
                 temp_outputs,
                 "htdemucs",
                 os.path.splitext(os.path.basename(args.audio))[0],
-                "vocals.wav",
-            )
+                    "vocals.wav",
+                )
+                update_progress(args.job_id, "source_separation_completed")
+                print("Source separation completed")
+            else: # If SNR is below threshold, enhance the vocals
+                vocals_path = os.path.join(
+                    temp_outputs,
+                    "htdemucs",
+                    os.path.splitext(os.path.basename(args.audio))[0],
+                    "vocals.wav",
+                )
+
+                update_progress(args.job_id, "source_separation_enhancing")
+                print("Source separation enhancing")
+                # Add vocal enhancement step
+                enhanced_vocals_path = os.path.join(
+                    temp_outputs,
+                    "htdemucs",
+                    os.path.splitext(os.path.basename(args.audio))[0],
+                    "vocals_enhanced.wav",
+                )
+                vocal_target = enhance_vocals(
+                    vocals_path, enhanced_vocals_path, volume_boost_db=6.0
+                )
+
+            update_progress(args.job_id, "source_separation_completed")
+            print("Source separation completed")
             quality_metrics = analyze_media_quality(vocal_target)
-            print("\nAudio Quality Analysis:")
+            print("\nAudio Quality Analysis after source separation:")
             for metric, value in quality_metrics.items():
                 if isinstance(value, float):
                     print(f"{metric}: {value:.2f}")
                 else:
                     print(f"{metric}: {value}")
-            update_progress(args.job_id, "source_separation_completed")
-            print("Source separation completed")
     except Exception as e:
         logging.error(f"Error in source separation: {str(e)}")
         vocal_target = args.audio
@@ -230,17 +247,34 @@ else:
 # Transcription stage
 update_progress(args.job_id, "transcription_started")
 print("Transcription started")
-whisper_results, language, audio_waveform = transcribe_batched(
-    vocal_target,
-    language,
-    args.batch_size,
-    args.model_name,
-    mtypes[args.device],
-    args.suppress_numerals,
-    args.device,
+
+whisper_model = faster_whisper.WhisperModel(
+    args.model_name, device=args.device, compute_type=mtypes[args.device]
 )
+whisper_pipeline = faster_whisper.BatchedInferencePipeline(whisper_model)
+audio_waveform = faster_whisper.decode_audio(vocal_target)
+
+if args.batch_size > 0:
+    transcript_segments, info = whisper_pipeline.transcribe(
+        audio_waveform,
+        language,
+        batch_size=args.batch_size,
+    )
+else:
+    transcript_segments, info = whisper_model.transcribe(
+        audio_waveform,
+        language,
+        vad_filter=True,
+    )
+full_transcript = "".join(segment.text for segment in transcript_segments)
+
+# clear gpu vram
+del whisper_model, whisper_pipeline
+torch.cuda.empty_cache()
+
 update_progress(args.job_id, "transcription_completed")
 print("Transcription completed")
+
 # Alignment stage
 update_progress(args.job_id, "alignment_started")
 print("Alignment started")
@@ -250,24 +284,21 @@ alignment_model, alignment_tokenizer = load_alignment_model(
     dtype=torch.float16 if args.device == "cuda" else torch.float32,
 )
 
-audio_waveform = (
+emissions, stride = generate_emissions(
+    alignment_model,
     torch.from_numpy(audio_waveform)
     .to(alignment_model.dtype)
-    .to(alignment_model.device)
-)
-emissions, stride = generate_emissions(
-    alignment_model, audio_waveform, batch_size=args.batch_size
+    .to(alignment_model.device),
+    batch_size=args.batch_size,
 )
 
 del alignment_model
 torch.cuda.empty_cache()
 
-full_transcript = "".join(segment["text"] for segment in whisper_results)
-
 tokens_starred, text_starred = preprocess_text(
     full_transcript,
     romanize=True,
-    language=langs_to_iso[language],
+    language=langs_to_iso[info.language],
 )
 
 segments, scores, blank_token = get_alignments(
@@ -289,7 +320,7 @@ print("Diarization started")
 mono_path = os.path.join(nemo_temp_path, "mono_file.wav")
 torchaudio.save(
     mono_path,
-    audio_waveform.cpu().unsqueeze(0).float(),
+    torch.from_numpy(audio_waveform).unsqueeze(0).float(),
     16000,
     channels_first=True,
 )
@@ -342,7 +373,7 @@ print("Finalizing started")
 wsm = get_words_speaker_mapping(word_timestamps, speaker_ts, "start")
 
 # Modified punctuation restoration section
-if language in punct_model_langs:
+if info.language in punct_model_langs:
     update_progress(args.job_id, "punctuation_restoration")
     print("Punctuation restoration")
 
@@ -378,7 +409,8 @@ if language in punct_model_langs:
 
 else:
     logging.warning(
-        f"Punctuation restoration is not available for {language} language. Using the original punctuation."
+        f"Punctuation restoration is not available for {info.language} language."
+        " Using the original punctuation."
     )
 
 update_progress(args.job_id, "generating_transcript")
