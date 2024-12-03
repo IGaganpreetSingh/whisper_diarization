@@ -76,13 +76,14 @@ class UniversalAudioAnalyzer:
         file_ext = os.path.splitext(file_path)[1].lower()
 
         try:
-            if file_ext in self.supported_direct_formats:
-                try:
-                    audio_data, sample_rate = librosa.load(file_path, sr=None)
-                except Exception:
-                    audio_data, sample_rate = self._load_audio_ffmpeg(file_path)
-            else:
+            # Always try FFmpeg first for consistency
+            try:
                 audio_data, sample_rate = self._load_audio_ffmpeg(file_path)
+            except Exception:
+                # Fallback to librosa only if FFmpeg fails
+                audio_data, sample_rate = librosa.load(
+                    file_path, sr=44100
+                )  # Force consistent sample rate
 
             return self.analyze_audio(audio_data, sample_rate)
 
@@ -166,9 +167,12 @@ class UniversalAudioAnalyzer:
             else float("inf")
         )
 
-        return {"snr_db": snr}
+        # Round to 2 decimal places for consistency
+        return {"snr_db": round(snr, 2)}
 
 
 def analyze_media_quality(file_path: str) -> Dict[str, float]:
     analyzer = UniversalAudioAnalyzer()
-    return analyzer.analyze_file(file_path)
+    result = analyzer.analyze_file(file_path)
+    # Ensure consistent formatting
+    return {"snr_db": round(result["snr_db"], 2)}
