@@ -1,7 +1,8 @@
 import librosa
 import numpy as np
-import ffmpeg
+import subprocess
 import os
+import json
 from typing import Dict, Tuple
 
 
@@ -21,30 +22,55 @@ class UniversalAudioAnalyzer:
         self, file_path: str, target_sr: int = 44100
     ) -> Tuple[np.ndarray, int]:
         try:
-            probe = ffmpeg.probe(file_path)
-            audio_info = next(s for s in probe["streams"] if s["codec_type"] == "audio")
+            # FFmpeg probe using subprocess
+            probe_cmd = [
+                "ffprobe",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
+                "-show_format",
+                "-show_streams",
+                file_path,
+            ]
+            probe_output = subprocess.check_output(probe_cmd)
+            probe_data = json.loads(probe_output)
 
-            stream = ffmpeg.input(file_path)
-            stream = ffmpeg.output(
-                stream,
+            # FFmpeg conversion command
+            cmd = [
+                "ffmpeg",
+                "-i",
+                file_path,
+                "-f",
+                "f32le",
+                "-acodec",
+                "pcm_f32le",
+                "-ac",
+                "1",
+                "-ar",
+                str(target_sr),
                 "pipe:",
-                format="f32le",
-                acodec="pcm_f32le",
-                ac=1,
-                ar=str(target_sr),
+            ]
+
+            # Run FFmpeg and capture output
+            process = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
+            out, err = process.communicate()
 
-            out, _ = ffmpeg.run(stream, capture_stdout=True, capture_stderr=True)
+            if process.returncode != 0:
+                raise RuntimeError(f"FFmpeg conversion failed: {err.decode()}")
+
+            # Convert to numpy array
             audio_data = np.frombuffer(out, np.float32)
-
             return audio_data, target_sr
 
-        except ffmpeg.Error as e:
-            print(f"FFmpeg error: {e.stderr.decode()}")
-            raise
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                f"FFmpeg error: {e.stderr.decode() if e.stderr else str(e)}"
+            )
         except Exception as e:
-            print(f"Error loading audio: {str(e)}")
-            raise
+            raise RuntimeError(f"Error processing audio: {str(e)}")
 
     def analyze_file(self, file_path: str) -> Dict[str, float]:
         file_ext = os.path.splitext(file_path)[1].lower()
@@ -53,7 +79,7 @@ class UniversalAudioAnalyzer:
             if file_ext in self.supported_direct_formats:
                 try:
                     audio_data, sample_rate = librosa.load(file_path, sr=None)
-                except:
+                except Exception:
                     audio_data, sample_rate = self._load_audio_ffmpeg(file_path)
             else:
                 audio_data, sample_rate = self._load_audio_ffmpeg(file_path)
@@ -61,8 +87,7 @@ class UniversalAudioAnalyzer:
             return self.analyze_audio(audio_data, sample_rate)
 
         except Exception as e:
-            print(f"Error analyzing file {file_path}: {str(e)}")
-            return {"error": str(e), "status": "failed"}
+            raise RuntimeError(f"Error analyzing file {file_path}: {str(e)}")
 
     def _get_active_speech_level(self, signal: np.ndarray, fs: int) -> float:
         """ITU-T P.56 based active speech level measurement"""
@@ -141,7 +166,6 @@ class UniversalAudioAnalyzer:
             else float("inf")
         )
 
-        # Return only SNR
         return {"snr_db": snr}
 
 

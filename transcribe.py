@@ -233,13 +233,6 @@ if args.stemming:
 
             update_progress(args.job_id, "source_separation_completed")
             print("Source separation completed")
-            quality_metrics = analyze_media_quality(vocal_target)
-            print("\nAudio Quality Analysis after source separation:")
-            for metric, value in quality_metrics.items():
-                if isinstance(value, float):
-                    print(f"{metric}: {value:.2f}")
-                else:
-                    print(f"{metric}: {value}")
     except Exception as e:
         logging.error(f"Error in source separation: {str(e)}")
         vocal_target = args.audio

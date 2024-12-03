@@ -1,6 +1,6 @@
 import os
 import json
-from fastapi import FastAPI, File, UploadFile, Form, BackgroundTasks
+from fastapi import FastAPI, File, UploadFile, Form, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 import subprocess
 import torch
@@ -11,12 +11,21 @@ from pathlib import Path
 from helpers import cleanup
 import time
 import psutil
-from audio_quality import analyze_media_quality
+from audio_quality import UniversalAudioAnalyzer
+from pydantic import BaseModel
 
 app = FastAPI()
 
 # Dictionary to store job statuses
 job_statuses = {}
+
+
+class SNRResponse(BaseModel):
+    snr_db: float
+
+
+class ErrorResponse(BaseModel):
+    detail: str
 
 
 class TranscriptionProgress:
@@ -292,8 +301,12 @@ async def cancel_transcription(job_id: str):
     return JSONResponse({"status": "canceled"})
 
 
-@app.post("/calculate-snr")
-async def calculate_snr(audio: UploadFile = File(...)) -> Dict[str, float]:
+@app.post(
+    "/calculate-snr",
+    response_model=SNRResponse,
+    responses={400: {"model": ErrorResponse}},
+)
+async def calculate_snr(audio: UploadFile = File(...)) -> SNRResponse:
     """
     Calculate SNR from uploaded audio file using existing analyzer
     """
@@ -305,10 +318,19 @@ async def calculate_snr(audio: UploadFile = File(...)) -> Dict[str, float]:
         temp_path = temp_file.name
 
     try:
-        # Use your existing analyze_media_quality function
-        return analyze_media_quality(temp_path)
+        analyzer = UniversalAudioAnalyzer()
+        result = analyzer.analyze_file(temp_path)
+        return SNRResponse(snr_db=result["snr_db"])
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=400, detail=f"Error processing audio file: {str(e)}"
+        )
     finally:
-        os.unlink(temp_path)
+        # Clean up temporary file
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
 
 if __name__ == "__main__":
     import uvicorn
