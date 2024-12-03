@@ -2,6 +2,7 @@ import os
 import json
 from fastapi import FastAPI, File, UploadFile, Form, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 import subprocess
 import torch
 import uuid
@@ -15,6 +16,15 @@ from audio_quality import UniversalAudioAnalyzer
 from pydantic import BaseModel
 
 app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
+)
 
 # Dictionary to store job statuses
 job_statuses = {}
