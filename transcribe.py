@@ -8,6 +8,7 @@ import torchaudio
 import librosa
 import soundfile as sf
 import json
+from fix_punct import TranscriptionProcessor
 from ctc_forced_aligner import (
     generate_emissions,
     get_alignments,
@@ -53,18 +54,19 @@ def update_progress(job_id, stage):
         "source_separation_started": 10,
         "source_separation_loading": 15,
         "source_separation_processing": 20,
+        "source_separation_enhancing": 25,
         "source_separation_completed": 30,
         "transcription_started": 35,
         "transcription_completed": 50,
         "alignment_started": 55,
-        "alignment_completed": 70,
-        "diarization_started": 75,
-        "diarization_model_loading": 80,
-        "diarization_processing": 85,
-        "diarization_completed": 90,
-        "finalizing_started": 92,
-        "punctuation_restoration": 95,
-        "generating_transcript": 97,
+        "alignment_completed": 60,
+        "diarization_started": 65,
+        "diarization_model_loading": 70,
+        "diarization_processing": 75,
+        "diarization_completed": 80,
+        "finalizing_started": 85,
+        "punctuation_restoration": 90,
+        "punctuation_restoration_by_GPT": 95,
         "saving_files": 98,
         "completed": 100,
     }
@@ -413,8 +415,6 @@ else:
         " Using the original punctuation."
     )
 
-update_progress(args.job_id, "generating_transcript")
-print("Generating transcript")
 # Final processing
 wsm = get_realigned_ws_mapping_with_punctuation(wsm)
 ssm = get_sentences_speaker_mapping(wsm, speaker_ts)
@@ -433,7 +433,11 @@ srt_txt = srt_io.getvalue()
 
 # Apply the cleanup functions
 formatted_transcript_txt = format_transcript(transcript_txt)
-formatted_srt_txt = format_transcript(srt_txt)
+update_progress(args.job_id, "punctuation_restoration_by_GPT")
+print("Punctuation restoration by GPT")
+punct_processor = TranscriptionProcessor()
+formatted_transcript_txt = punct_processor.process_transcription(formatted_transcript_txt)
+# formatted_srt_txt = format_transcript(srt_txt)
 
 update_progress(args.job_id, "saving_files")
 print("Saving files")
@@ -444,12 +448,12 @@ transcript_output_path = os.path.join(
 with open(transcript_output_path, "w", encoding="utf-8-sig") as f:
     f.write(formatted_transcript_txt)
 
-# Write SRT output to the specified directory
-srt_output_path = os.path.join(
-    args.temp_dir, f"{os.path.splitext(os.path.basename(args.audio))[0]}.srt"
-)
-with open(srt_output_path, "w", encoding="utf-8-sig") as f:
-    f.write(formatted_srt_txt)
+# # Write SRT output to the specified directory
+# srt_output_path = os.path.join(
+#     args.temp_dir, f"{os.path.splitext(os.path.basename(args.audio))[0]}.srt"
+# )
+# with open(srt_output_path, "w", encoding="utf-8-sig") as f:
+#     f.write(formatted_srt_txt)
 
 update_progress(args.job_id, "completed")
 print("Completed")
