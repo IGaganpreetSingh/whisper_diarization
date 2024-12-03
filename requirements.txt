@@ -9,3 +9,4 @@ python-multipart
 fastapi 
 uvicorn
 ipython
+python-ffmpeg
