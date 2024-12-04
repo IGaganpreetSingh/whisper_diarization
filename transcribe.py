@@ -34,6 +34,7 @@ from helpers import (
     punct_model_langs,
     whisper_langs,
     format_transcript,
+    fix_speaker_spacing_post_gpt,
     write_srt,
 )
 import numpy as np
@@ -430,6 +431,7 @@ update_progress(args.job_id, "punctuation_restoration_by_GPT")
 print("Punctuation restoration by GPT")
 punct_processor = TranscriptionProcessor()
 formatted_transcript_txt = punct_processor.process_transcription(formatted_transcript_txt)
+formatted_transcript_txt = fix_speaker_spacing_post_gpt(formatted_transcript_txt)
 # formatted_srt_txt = format_transcript(srt_txt)
 
 update_progress(args.job_id, "saving_files")

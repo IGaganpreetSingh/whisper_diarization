@@ -438,7 +438,7 @@ def format_transcript(text):
         # line = re.sub(r"(\w+) at (\w+)\s*\.\s*(\w+)", r"\1@\2.\3", line)
         line = re.sub(r"(\d+)\s*-\s*(\d+)\s*-\s*(\d+)", r"\1-\2-\3", line)
         # Use re.sub to remove all occurrences of "..."
-        line = re.sub(r"\.\.\.", "[indistinct]", line)
+        line = re.sub(r"\.\.\.", " [indistinct]", line)
         line = re.sub(
             r"(\d{1,3}(,\d{3})*(\.\d+)?)[ ]+(?<!\w)rand\b(?!\w)",
             r"R\1",
@@ -472,6 +472,34 @@ def format_transcript(text):
 
     # Join the cleaned lines back together, preserving new lines between speakers
     return "\n".join(cleaned_lines)
+
+
+def fix_speaker_spacing_post_gpt(text):
+    """
+    Ensures proper spacing between speaker lines after GPT processing.
+    Adds one empty line between speaker lines if not present.
+    """
+    # Split text into lines
+    lines = text.splitlines()
+    fixed_lines = []
+
+    for i in range(len(lines)):
+        current_line = lines[i].strip()
+        fixed_lines.append(current_line)
+
+        # If this isn't the last line, check the next line
+        if i < len(lines) - 1:
+            next_line = lines[i + 1].strip()
+
+            # If both current and next lines are speaker lines
+            if re.match(r"^Speaker \d+:", current_line) and re.match(
+                r"^Speaker \d+:", next_line
+            ):
+                # Check if there's already an empty line
+                if i + 1 < len(lines) and lines[i + 1].strip():
+                    fixed_lines.append("")  # Add empty line if not present
+
+    return "\n".join(fixed_lines)
 
 
 def get_realigned_ws_mapping_with_punctuation(
