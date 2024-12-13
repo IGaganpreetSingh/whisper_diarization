@@ -21,7 +21,7 @@ from audio_quality import analyze_media_quality
 from deepmultilingualpunctuation import PunctuationModel
 from nemo.collections.asr.models.msdd_models import NeuralDiarizer
 import warnings
-from transformers import logging
+import logging
 from helpers import (
     cleanup,
     create_config,
@@ -39,10 +39,6 @@ from helpers import (
 )
 import numpy as np
 
-logging.set_verbosity_error()
-warnings.filterwarnings(
-    "ignore", message="You seem to be using the pipelines sequentially on GPU.*"
-)
 
 def update_progress(job_id, stage):
     """Update progress through file system"""
